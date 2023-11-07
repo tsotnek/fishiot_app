@@ -1,33 +1,33 @@
-/*
- * Copyright (c) 2018 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
- */
-
 #include <stdio.h>
 #include <zephyr/kernel.h>
-#include <zephyr/net/socket.h>
+
 // #include <zephyr/net/mqtt.h>
+//nrf cloud and agps
 #include <net/nrf_cloud.h>
 #include <net/nrf_cloud_agps.h>
 #include <zephyr/logging/log.h>
-#include <dk_buttons_and_leds.h>
-#include <modem/nrf_modem_lib.h>
-#include <modem/lte_lc.h>
-#include <modem/modem_info.h>
-#include <modem/modem_jwt.h>
 #include <date_time.h>
 #include <net/nrf_cloud_rest.h>
 #include <time.h>
-#include "mqtt_connection.h"
+#include <modem/modem_info.h>
+#include <modem/modem_jwt.h>
+//LTE
+#include <modem/nrf_modem_lib.h>
+#include <modem/lte_lc.h>
+#include <zephyr/net/socket.h>
+
+#include <dk_buttons_and_leds.h>
+// #include "mqtt_connection.h"
 //header file for the GNSS interface.
 #include <nrf_modem_gnss.h>
+#include "gnss_connection.h"
 
+
+extern int64_t gnss_start_time;
 //PVT data frame variables,
-static struct nrf_modem_gnss_pvt_data_frame pvt_data;
+struct nrf_modem_gnss_pvt_data_frame pvt_data;
 
 /*Helper variables to find the TTFF */
-static int64_t gnss_start_time;
 static bool first_fix = false;
 
 static K_SEM_DEFINE(lte_connected, 0, 1);
@@ -35,71 +35,11 @@ static K_SEM_DEFINE(time_sem, 0, 1);
 
 LOG_MODULE_REGISTER(FishIoT, LOG_LEVEL_INF);
 
-static char recv_buffer[2048];
-static char agps_data_buf[3500];
-static char jwt_buf[600];
-
-
 //Function prototypes
-static void lte_handler(const struct lte_lc_evt *const evt);
 static int modem_configure(void);
-
-static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data);
-static int gnss_init_and_start(void);
-static void gnss_event_handler(int event);
-
-// static void nrf_cloud_handler(const struct nrf_cloud_evt *evt)
-// {
-// 	switch(evt->type)
-// 	{
-// 		case NRF_CLOUD_EVT_TRANSPORT_CONNECTED:
-// 			LOG_INF("Connected to cloud successfully");
-// 			k_sem_give(&start_gnss);
-// 			break;
-// 		case NRF_CLOUD_EVT_TRANSPORT_CONNECTING:
-// 			LOG_INF("Connecting to cloud...");
-// 			break;
-// 		case NRF_CLOUD_EVT_USER_ASSOCIATION_REQUEST:
-// 			LOG_INF("There was a request from nRF Cloud to associate the device with a user on the nRF Cloud.");
-// 			break;
-// 		case NRF_CLOUD_EVT_USER_ASSOCIATED:
-// 			LOG_INF("The device is successfully associated with a user.");
-// 			break;
-// 		case NRF_CLOUD_EVT_READY:
-// 			LOG_INF("NRF_CLOUD_EVT_READY");
-// 			break;
-// 		case NRF_CLOUD_EVT_RX_DATA_GENERAL:
-// 			LOG_INF("The device received non-specific data from the cloud.");
-// 			break;
-// 		case NRF_CLOUD_EVT_RX_DATA_LOCATION:
-// 			LOG_INF("The device received location data from the cloud and no response callback was registered.");
-// 			// int err = nrf_cloud_agps_process((evt->data).ptr, (evt->data).len);
-// 			// if(err){
-// 			// 	LOG_ERR("Error ooccured %d", err);
-// 			// }
-// 			break;
-// 		case NRF_CLOUD_EVT_RX_DATA_SHADOW:
-// 			LOG_INF("The device received shadow related data from the cloud.");
-// 			break;
-// 		case NRF_CLOUD_EVT_PINGRESP:
-// 			LOG_INF("The device has received a ping response from the cloud.");
-// 			break;
-// 		case NRF_CLOUD_EVT_SENSOR_DATA_ACK:
-// 			LOG_INF("The data sent to the cloud was acknowledged.");
-// 			break;
-// 		case NRF_CLOUD_EVT_TRANSPORT_DISCONNECTED:
-// 			LOG_INF("The transport was disconnected. The status field in the event struct will be populated with a nrf_cloud_disconnect_status value.");
-// 			break;
-// 		case NRF_CLOUD_EVT_ERROR:
-// 			LOG_INF("Cloud evt failed");
-// 			// cloud_connected = 2;
-// 			break;
-// 		default:
-// 			LOG_INF("Some unhandled event in NRF cloud handler occured, type: %d", evt->type);
-// 			break;
-// 	}
-// }
-
+//handlers
+void gnss_event_handler(int event);
+static void lte_handler(const struct lte_lc_evt *const evt);
 
 int main(void)
 {
@@ -108,68 +48,28 @@ int main(void)
 	
 	if (dk_leds_init() != 0) {
 		LOG_ERR("Failed to initialize the LED library");
+		return 1;
 	}
 
 	err = modem_configure();
 	if (err) {
 		LOG_ERR("Failed to configure the modem");
+		return 1;
 	}
 	
-
-	struct nrf_cloud_rest_agps_request nrf_agps_requst_struct = {
-		.type = NRF_CLOUD_REST_AGPS_REQ_ASSISTANCE,
-		.agps_req = NULL,
-		.net_info = NULL,
-	};
-
-		err = nrf_cloud_jwt_generate(0, jwt_buf, sizeof(jwt_buf));
-	if (err) {
-		LOG_ERR("Failed to generate JWT, error: %d", err);
+	err = agps_receive_process_data();
+	if(err){
+		LOG_ERR("Failed to receive and process AGPS data");
+		return 1;
 	}
-
-	struct nrf_cloud_rest_context nrf_rest_struct = {
-		.connect_socket = -1,
-		.keep_alive = false,
-		.timeout_ms = NRF_CLOUD_REST_TIMEOUT_NONE,
-		.auth = jwt_buf,
-		.rx_buf = recv_buffer,
-		.rx_buf_len = sizeof(recv_buffer),
-		.fragment_size = 0, /* Defaults to CONFIG_NRF_CLOUD_REST_FRAGMENT_SIZE when 0 */
-		.status = 0,
-		.response = NULL,
-		.response_len = 0,
-		.total_response_len = 0
-	};
-	struct nrf_cloud_rest_agps_result result = {
-		.buf = agps_data_buf,
-		.buf_sz = sizeof(agps_data_buf),
-		.agps_sz = 0
-	};
-
-	err = nrf_cloud_rest_agps_data_get(&nrf_rest_struct, &nrf_agps_requst_struct, &result);
-	if(err)
-	{
-		LOG_ERR("Unsuccessful rest data get, error %d", err);
-	}
-	LOG_INF("%s",recv_buffer);
-
-	err = nrf_cloud_agps_process(result.buf, result.agps_sz);
-	if(err)
-	{
-		LOG_ERR("Unable to parse the the AGPS");
-	}
-	LOG_INF("Successfully parsed AGPS");
-
+	
 	if (gnss_init_and_start() != 0) {
 		LOG_ERR("Failed to initialize and start GNSS");
-		return 0;
+		return 1;
 	}
 
 	return 0;
 }
-
-
-
 
 static void lte_handler(const struct lte_lc_evt *const evt)
 {
@@ -193,7 +93,6 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 			evt->psm_cfg.tau, evt->psm_cfg.active_time);
 		if (evt->psm_cfg.active_time == -1){
 			LOG_ERR("Network rejected PSM parameters. Failed to enable PSM");
-		
 	}
      default:
              break;
@@ -213,21 +112,17 @@ static int modem_configure(void)
 
 	LOG_INF("Initializing modem library");
 
-	// date_time_register_handler(date_time_evt_handler);
-	
 	err = nrf_modem_lib_init();
 	if (err) {
 		LOG_ERR("Failed to initialize the modem library, error: %d", err);
 		return err;
 	}
-
 	
-	
-	if (lte_lc_init() != 0) {
+	err = lte_lc_init();
+	if (err) {
 		LOG_ERR("Failed to initialize LTE link controller");
-		return -1;
+		return 1;
 	}
-
 
 	//enable PSM
 	err = lte_lc_psm_req(true);
@@ -241,7 +136,7 @@ static int modem_configure(void)
 
 	if (lte_lc_connect() != 0) {
 		LOG_ERR("Failed to connect to LTE network");
-		return -1;
+		return 1;
 	}
 
 	LOG_INF("Connected to LTE network");
@@ -250,21 +145,7 @@ static int modem_configure(void)
 		LOG_ERR("Date time update handler failed");
 	}	
 	dk_set_led_on(DK_LED2);
-	LOG_INF("Waiting for current time");
-	// time_t unix_time;
-	// struct tm * timeinfo;
-	// if(date_time_now(&unix_time)==0){
-	// 	timeinfo = localtime(&unix_time);
-	// 	if(date_time_set(&timeinfo)==0)
-	// 	{
-	// 		k_sem_give(&time_sem);
-	// 	}
-	// 	else
-	// 		LOG_ERR("Time set failed");
-	// }
-	
-	
-	
+	LOG_INF("Waiting for current time");	
 	/* Wait for an event from the Date Time library. */
 	k_sem_take(&time_sem, K_MINUTES(10));
 
@@ -274,28 +155,14 @@ static int modem_configure(void)
 	return 0;
 }
 
-
-static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
-{
-	LOG_INF("Latitude:       %.06f", pvt_data->latitude);
-	LOG_INF("Longitude:      %.06f", pvt_data->longitude);
-	LOG_INF("Altitude:       %.01f m", pvt_data->altitude);
-	LOG_INF("Time (UTC):     %02u:%02u:%02u.%03u",
-	       pvt_data->datetime.hour,
-	       pvt_data->datetime.minute,
-	       pvt_data->datetime.seconds,
-	       pvt_data->datetime.ms);
-}
-
-
-static void gnss_event_handler(int event)
+void gnss_event_handler(int event)
 {
 	int err;
 	switch (event) {
-	/* STEP 7 - On a PVT event, confirm if PVT data is a valid fix */
+	/*On a PVT event, confirm if PVT data is a valid fix */
 	case NRF_MODEM_GNSS_EVT_PVT:
 		LOG_INF("Searching...");
-		/* STEP 15 - Print satellite information */
+		/*Print satellite information */
 		int num_satellites = 0;
 		for (int i = 0; i < 12 ; i++) {
 			if (pvt_data.sv[i].signal != 0) {
@@ -312,7 +179,7 @@ static void gnss_event_handler(int event)
 		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
 			dk_set_led_on(DK_LED1);
 			print_fix_data(&pvt_data);
-			/* STEP 12.3 - Print the time to first fix */
+			/* Print the time to first fix */
 			if (!first_fix) {
 				LOG_INF("Time to first fix: %2.1lld s", (k_uptime_get() - gnss_start_time)/1000);
 				first_fix = true;
@@ -320,7 +187,7 @@ static void gnss_event_handler(int event)
 			return;
 		}
 		break;
-	/* STEP 7.2 - Log when the GNSS sleeps and wakes up */
+	/* Log when the GNSS sleeps and wakes up */
 	case NRF_MODEM_GNSS_EVT_PERIODIC_WAKEUP:
 		LOG_INF("GNSS has woken up");
 		break;
@@ -330,41 +197,4 @@ static void gnss_event_handler(int event)
 	default:
 		break;
 	}
-}
-
-
-
-static int gnss_init_and_start(void)
-{
-
-	/* STEP 4 - Set the modem mode to normal */
-	if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_NORMAL) != 0) {
-		LOG_ERR("Failed to activate GNSS functional mode");
-		return -1;
-	}
-
-	if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0) {
-		LOG_ERR("Failed to set GNSS event handler");
-		return -1;
-	}
-
-	if (nrf_modem_gnss_fix_interval_set(CONFIG_GNSS_PERIODIC_INTERVAL) != 0) {
-		LOG_ERR("Failed to set GNSS fix interval");
-		return -1;
-	}
-
-	if (nrf_modem_gnss_fix_retry_set(CONFIG_GNSS_PERIODIC_TIMEOUT) != 0) {
-		LOG_ERR("Failed to set GNSS fix retry");
-		return -1;
-	}
-
-	LOG_INF("Starting GNSS");
-	if (nrf_modem_gnss_start() != 0) {
-		LOG_ERR("Failed to start GNSS");
-		return -1;
-	}
-
-	gnss_start_time = k_uptime_get();
-
-	return 0;
 }
