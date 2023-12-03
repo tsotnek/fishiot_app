@@ -25,6 +25,7 @@
 #include <zephyr/net/mqtt.h>
 #include "mqtt_connection.h"
 
+
 #define STACKSIZE 1024
 #define THREAD0_PRIORITY 7
 
@@ -48,7 +49,7 @@ static K_SEM_DEFINE(lte_connected, 0, 1);
 static K_SEM_DEFINE(time_sem, 0, 1);
 static K_SEM_DEFINE(mqtt_pub_sem, 0, 1);
 static K_SEM_DEFINE(mqtt_pub_thread_start, 0, 1);
-
+static K_SEM_DEFINE(gnss_start_sem, 0, 1);
 
 LOG_MODULE_REGISTER(FishIoT, LOG_LEVEL_INF);
 
@@ -87,13 +88,22 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 	case LTE_LC_EVT_RRC_UPDATE:
 		LOG_INF("RRC mode: %s", evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ?
 				"Connected" : "Idle");
+		if(evt->rrc_mode == LTE_LC_RRC_MODE_IDLE)
+			k_sem_give(&gnss_start_sem);
 		break;
 	case LTE_LC_EVT_PSM_UPDATE:
 		LOG_INF("PSM parameter update: TAU: %d, Active time: %d",
 			evt->psm_cfg.tau, evt->psm_cfg.active_time);
 		if (evt->psm_cfg.active_time == -1){
 			LOG_ERR("Network rejected PSM parameters. Failed to enable PSM");
-	}
+		}	
+		break;
+	case LTE_LC_EVT_MODEM_SLEEP_EXIT:
+		LOG_INF("Modem exited from sleep.");
+		break;
+	case LTE_LC_EVT_MODEM_SLEEP_ENTER:
+		LOG_INF("Modem entered sleep.");
+		break;
      default:
              break;
      }
@@ -256,6 +266,7 @@ int main(void)
 		return 1;
 	}
 	
+	k_sem_take(&gnss_start_sem, K_FOREVER);
 	if (gnss_init_and_start() != 0) {
 		LOG_ERR("Failed to initialize and start GNSS");
 		return 1;

@@ -7,6 +7,8 @@
 #include <modem/modem_jwt.h>
 #include "gnss_connection.h"
 
+#define PPS
+
 
 LOG_MODULE_DECLARE(FishIoT);
 
@@ -107,6 +109,19 @@ int gnss_init_and_start(void)
 		LOG_ERR("Failed to set GNSS fix retry");
 		return 1;
 	}
+
+#ifdef PPS
+	struct nrf_modem_gnss_1pps_config pps_config = {
+    .pulse_interval = 1,
+    .pulse_width = 100,
+    .apply_start_time = false
+	};
+
+	int err = nrf_modem_gnss_1pps_enable(&pps_config);
+	if(err){
+		LOG_INF("Failed to enable 1pps");
+	}
+#endif
 
 	LOG_INF("Starting GNSS");
 	if (nrf_modem_gnss_start() != 0) {
