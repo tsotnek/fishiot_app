@@ -1,21 +1,14 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <zephyr/logging/log.h>
 #include <zephyr/kernel.h>
-#include <zephyr/net/socket.h>
 #include <zephyr/random/rand32.h>
+#include <zephyr/net/socket.h>
 #include <zephyr/net/mqtt.h>
-
+#include <nrf_modem_at.h>
+#include <zephyr/logging/log.h>
 #include <dk_buttons_and_leds.h>
 #include "mqtt_connection.h"
-#include <nrf_modem_at.h>
-
-/* STEP 2.4 - Include the header for the Modem Key Management library */
-#include <modem/modem_key_mgmt.h>
-
-/* STEP 3.3 - Include certificate.h */
-#include "certificate.h"
 
 /* Buffers for MQTT client. */
 static uint8_t rx_buffer[CONFIG_MQTT_MESSAGE_BUFFER_SIZE];
@@ -24,46 +17,9 @@ static uint8_t payload_buf[CONFIG_MQTT_PAYLOAD_BUFFER_SIZE];
 
 /* MQTT Broker details. */
 static struct sockaddr_storage broker;
+
 LOG_MODULE_DECLARE(FishIoT);
-bool mqtt_connack_bool = false;
-/**@brief Function to store the server x.509 root certificate to the modem 
- */
-/* STEP 4.2 - Add the function certificate_provision() that will store the certificate to the modem.*/
-int certificate_provision(void)
-{
-	int err = 0;
-	bool exists;
 
-	err = modem_key_mgmt_exists(CONFIG_MQTT_TLS_SEC_TAG,
-				    MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN,
-				    &exists);
-	if (err) {
-		LOG_ERR("Failed to check for certificates err %d\n", err);
-		return err;
-	}
-
-	if (exists) {
-		/* Let's compare the existing credential */
-		err = modem_key_mgmt_cmp(CONFIG_MQTT_TLS_SEC_TAG,
-					 MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN,
-					 CA_CERTIFICATE, 
-					 strlen(CA_CERTIFICATE));
-		LOG_INF("%s\n", err ? "mismatch" : "match");
-		if (!err) {
-			return 0;
-		}
-	}
-	LOG_INF("Provisioning certificates");
-	err = modem_key_mgmt_write(CONFIG_MQTT_TLS_SEC_TAG,
-				   MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN,
-				   CA_CERTIFICATE,
-				   strlen(CA_CERTIFICATE));
-	if (err) {
-		LOG_ERR("Failed to provision CA certificate: %d", err);
-		return err;
-	}
-	return err;
-}
 
 /**@brief Function to print strings without null-termination
  */
@@ -78,10 +34,11 @@ static void data_print(uint8_t *prefix, uint8_t *data, size_t len)
 
 /**@brief Function to publish data on the configured topic
  */
-int data_publish(struct mqtt_client *c, enum mqtt_qos qos, uint8_t *data, size_t len)
+/* STEP 7.1 - Define the function data_publish() to publish data */
+int data_publish(struct mqtt_client *c, enum mqtt_qos qos,
+	uint8_t *data, size_t len)
 {
 	struct mqtt_publish_param param;
-
 	param.message.topic.qos = qos;
 	param.message.topic.topic.utf8 = CONFIG_MQTT_PUB_TOPIC;
 	param.message.topic.topic.size = strlen(CONFIG_MQTT_PUB_TOPIC);
@@ -90,29 +47,30 @@ int data_publish(struct mqtt_client *c, enum mqtt_qos qos, uint8_t *data, size_t
 	param.message_id = sys_rand32_get();
 	param.dup_flag = 0;
 	param.retain_flag = 0;
-
 	data_print("Publishing: ", data, len);
 	LOG_INF("to topic: %s len: %u",
 		CONFIG_MQTT_PUB_TOPIC,
 		(unsigned int)strlen(CONFIG_MQTT_PUB_TOPIC));
-
 	return mqtt_publish(c, &param);
 }
+
+
 /**@brief MQTT client event handler
  */
-void mqtt_evt_handler(struct mqtt_client *const c, const struct mqtt_evt *evt)
+void mqtt_evt_handler(struct mqtt_client *const c,
+		      const struct mqtt_evt *evt)
 {
 	int err;
 
 	switch (evt->type) {
 	case MQTT_EVT_CONNACK:
+	/* STEP 5 - Subscribe to the topic CONFIG_MQTT_SUB_TOPIC when we have a successful connection */
 		if (evt->result != 0) {
 			LOG_ERR("MQTT connect failed: %d", evt->result);
 			break;
 		}
-
 		LOG_INF("MQTT client connected");
-		mqtt_connack_bool = true;
+		// subscribe(c);
 		break;
 
 	case MQTT_EVT_DISCONNECT:
@@ -126,6 +84,15 @@ void mqtt_evt_handler(struct mqtt_client *const c, const struct mqtt_evt *evt)
 		}
 
 		LOG_INF("PUBACK packet id: %u", evt->param.puback.message_id);
+		break;
+
+	case MQTT_EVT_SUBACK:
+		if (evt->result != 0) {
+			LOG_ERR("MQTT SUBACK error: %d", evt->result);
+			break;
+		}
+
+		LOG_INF("SUBACK packet id: %u", evt->param.suback.message_id);
 		break;
 
 	case MQTT_EVT_PINGRESP:
@@ -230,19 +197,18 @@ exit:
 
 /**@brief Initialize the MQTT client structure
  */
+/* STEP 3 - Define the function client_init() to initialize the MQTT client instance.  */
 int client_init(struct mqtt_client *client)
 {
 	int err;
-	/* Initializes the client instance. */
+	/* initializes the client instance. */
 	mqtt_client_init(client);
-
 	/* Resolves the configured hostname and initializes the MQTT broker structure */
 	err = broker_init();
 	if (err) {
 		LOG_ERR("Failed to initialize broker connection");
 		return err;
 	}
-
 	/* MQTT client configuration */
 	client->broker = &broker;
 	client->evt_cb = mqtt_evt_handler;
@@ -251,34 +217,13 @@ int client_init(struct mqtt_client *client)
 	client->password = NULL;
 	client->user_name = NULL;
 	client->protocol_version = MQTT_VERSION_3_1_1;
-
 	/* MQTT buffers configuration */
 	client->rx_buf = rx_buffer;
 	client->rx_buf_size = sizeof(rx_buffer);
 	client->tx_buf = tx_buffer;
 	client->tx_buf_size = sizeof(tx_buffer);
-
-	/* STEP 5 - Modify the client client_init() function to use Secure TCP transport instead of non-secure TCP transport.  */
-
-	//get a pointer to the TLS configration 
-	struct mqtt_sec_config *tls_cfg = &(client->transport).tls.config;
-	static sec_tag_t sec_tag_list[] = { CONFIG_MQTT_TLS_SEC_TAG };
-
-	LOG_INF("TLS enabled");
-	client->transport.type = MQTT_TRANSPORT_SECURE;
-
-	tls_cfg->peer_verify = CONFIG_MQTT_TLS_PEER_VERIFY;
-	tls_cfg->cipher_list = NULL;
-	tls_cfg->cipher_count = 0;
-	tls_cfg->sec_tag_count = ARRAY_SIZE(sec_tag_list);
-	tls_cfg->sec_tag_list = sec_tag_list;
-	tls_cfg->hostname = CONFIG_MQTT_BROKER_HOSTNAME;
-
-	tls_cfg->session_cache = IS_ENABLED(CONFIG_MQTT_TLS_SESSION_CACHING) ?
-					    TLS_SESSION_CACHE_ENABLED :
-					    TLS_SESSION_CACHE_DISABLED;
-
-
+	/* We are not using TLS in Exercise 1 */
+	client->transport.type = MQTT_TRANSPORT_NON_SECURE;
 	return err;
 }
 
@@ -289,8 +234,7 @@ int fds_init(struct mqtt_client *c, struct pollfd *fds)
 	if (c->transport.type == MQTT_TRANSPORT_NON_SECURE) {
 		fds->fd = c->transport.tcp.sock;
 	} else {
-		/* STEP 6 - Update the file descriptor for the socket to use TLS socket instead of a plain TCP socket.*/
-		fds->fd = c->transport.tls.sock;
+		return -ENOTSUP;
 	}
 
 	fds->events = POLLIN;

@@ -1,9 +1,3 @@
-#
-# Copyright (c) 2020 Nordic Semiconductor ASA
-#
-# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
-#
-
 menu "FishIoT"
 
 config MQTT_PUB_TOPIC
@@ -72,6 +66,15 @@ config MQTT_TLS_PEER_VERIFY
 		Set to 0 for VERIFY_NONE, 1 for VERIFY_OPTIONAL, and 2 for
 		VERIFY_REQUIRED.
 
+config GNSS_SAMPLE_ASSISTANCE_NRF_CLOUD
+	bool "Use nRF Cloud A-GNSS"
+	select NRF_CLOUD_REST
+	imply NRF_CLOUD_AGNSS
+	select MODEM_JWT
+	select MODEM_INFO
+	select DATE_TIME
+
+
 config GNSS_PERIODIC_INTERVAL
 	int "Fix interval for periodic GPS fixes"
 	range 10 65535
@@ -82,12 +85,10 @@ config GNSS_PERIODIC_INTERVAL
 config GNSS_PERIODIC_TIMEOUT
 	int "Fix timeout for periodic GPS fixes"
 	range 0 65535
-	default 480
+	default 180
 	help
 	  Fix timeout (in seconds) for periodic fixes.
 	  If set to zero, GNSS is allowed to run indefinitely until a valid PVT estimate is produced.
 endmenu
 
 source "Kconfig.zephyr"
-
-
