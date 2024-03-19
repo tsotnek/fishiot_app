@@ -1,0 +1,31 @@
+The simplest way is to use device_credentials_installer.py script and connect to device with UART
+and automatically install credentials. 
+
+
+
+IMPORTANT to edit the script in line 587 to just "ser = serial.Serial(port, 115200, timeout=serial_timeout)"
+
+
+
+This script will also generate the provision.csv file which will be used to provision the device to the server
+
+
+
+
+Afterwards just provision with curl POST command 
+
+curl -X POST $API_HOST/v1/devices \
+--data-binary @$PATH_TO_CSV_FILE \
+-H "Content-Type: application/octet-stream" \
+-H "Authorization: Bearer $API_KEY"
+
+
+
+
+
+and then we need to create a csv file using just the ID and public key to later register the public key using 
+
+curl -X POST $API_HOST/v1/devices/public-keys \
+--data-binary @$PATH_TO_CSV_FILE \
+-H "Content-Type: application/octet-stream" \
+-H "Authorization: Bearer $API_KEY"

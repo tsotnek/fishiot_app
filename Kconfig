@@ -66,6 +66,15 @@ config MQTT_TLS_PEER_VERIFY
 		Set to 0 for VERIFY_NONE, 1 for VERIFY_OPTIONAL, and 2 for
 		VERIFY_REQUIRED.
 
+config GNSS_SAMPLE_ASSISTANCE_NRF_CLOUD
+	bool "Use nRF Cloud A-GNSS"
+	select NRF_CLOUD_REST
+	imply NRF_CLOUD_AGNSS
+	select MODEM_JWT
+	select MODEM_INFO
+	select DATE_TIME
+
+
 config GNSS_PERIODIC_INTERVAL
 	int "Fix interval for periodic GPS fixes"
 	range 10 65535
@@ -83,5 +92,3 @@ config GNSS_PERIODIC_TIMEOUT
 endmenu
 
 source "Kconfig.zephyr"
-
-

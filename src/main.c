@@ -5,7 +5,7 @@
 // #include <zephyr/net/mqtt.h>
 //nrf cloud and agps
 #include <net/nrf_cloud.h>
-#include <net/nrf_cloud_agps.h>
+#include <net/nrf_cloud_agnss.h>
 #include <zephyr/logging/log.h>
 #include <date_time.h>
 #include <net/nrf_cloud_rest.h>
@@ -149,8 +149,10 @@ void gnss_event_handler(int event)
 	case NRF_MODEM_GNSS_EVT_SLEEP_AFTER_FIX:
 		
 		LOG_INF("GNSS enter sleep after fix");
+
 		k_sem_give(&mqtt_pub_thread_start);
 		k_sem_give(&mqtt_pub_sem);
+		
 		break;
 	default:
 		break;
@@ -179,6 +181,7 @@ void data_formatter(struct nrf_modem_gnss_pvt_data_frame *pvt_data){
 void mqtt_thread(void){
 	
 	k_sem_take(&mqtt_pub_thread_start, K_FOREVER);
+	
 	int err;
 	err = client_init(&client);
 	if (err) {
@@ -258,19 +261,25 @@ int main(void)
 		LOG_ERR("Failed to configure the modem");
 		return 1;
 	}
-	
+
+	k_sleep(K_SECONDS(10));
+
 	// k_sem_give(&mqtt_pub_sem);
 	err = agps_receive_process_data();
 	if(err){
 		LOG_ERR("Failed to receive and process AGPS data");
 		return 1;
 	}
+
+	
 	
 	k_sem_take(&gnss_start_sem, K_FOREVER);
 	if (gnss_init_and_start() != 0) {
 		LOG_ERR("Failed to initialize and start GNSS");
 		return 1;
 	}
+	
+	
 	
 	return 0;
 }
@@ -325,9 +334,10 @@ static int modem_configure(void)
 	LOG_INF("Waiting for current time");	
 	/* Wait for an event from the Date Time library. */
 	k_sem_take(&time_sem, K_MINUTES(10));
-
+		
 	if (!date_time_is_valid()) {
 		LOG_WRN("Failed to get current time, continuing anyway");
 	}
+	LOG_INF("Received current time successfully!");
 	return 0;
 }

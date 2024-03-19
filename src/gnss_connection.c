@@ -1,7 +1,7 @@
 #include <zephyr/logging/log.h>
 #include <nrf_modem_gnss.h>
 #include <net/nrf_cloud.h>
-#include <net/nrf_cloud_agps.h>
+#include <net/nrf_cloud_agnss.h>
 #include <net/nrf_cloud_rest.h>
 #include <modem/modem_info.h>
 #include <modem/modem_jwt.h>
@@ -36,9 +36,9 @@ int agps_receive_process_data(void){
     
     int err;
 
-    struct nrf_cloud_rest_agps_request nrf_agps_requst_struct = {
-		.type = NRF_CLOUD_REST_AGPS_REQ_ASSISTANCE,
-		.agps_req = NULL,
+    struct nrf_cloud_rest_agnss_request nrf_agps_requst_struct = {
+		.type = NRF_CLOUD_REST_AGNSS_REQ_ASSISTANCE,
+		.agnss_req = NULL,
 		.net_info = NULL,
 	};
 
@@ -55,19 +55,24 @@ int agps_receive_process_data(void){
 		.response_len = 0,
 		.total_response_len = 0
 	};
-	struct nrf_cloud_rest_agps_result result = {
+	struct nrf_cloud_rest_agnss_result result = {
 		.buf = agps_data_buf,
 		.buf_sz = sizeof(agps_data_buf),
-		.agps_sz = 0
+		.agnss_sz = 0
 	};
+
+
+
 
     err = nrf_cloud_jwt_generate(0, jwt_buf, sizeof(jwt_buf));
 	if (err) {
 		LOG_ERR("Failed to generate JWT, error: %d", err);
         return 1;
 	}
+	LOG_INF("Generated JWT successfully!");
 
-	err = nrf_cloud_rest_agps_data_get(&nrf_rest_struct, &nrf_agps_requst_struct, &result);
+	LOG_INF("Requesting AGPS Data...");
+	err = nrf_cloud_rest_agnss_data_get(&nrf_rest_struct, &nrf_agps_requst_struct, &result);
 	if(err)
 	{
 		LOG_ERR("Unsuccessful rest data get, error %d", err);
@@ -75,7 +80,8 @@ int agps_receive_process_data(void){
 	}
 	LOG_INF("%s",recv_buffer);
 
-	err = nrf_cloud_agps_process(result.buf, result.agps_sz);
+	LOG_INF("Starting to process AGPS data...");
+	err = nrf_cloud_agnss_process(result.buf, result.agnss_sz);
 	if(err)
 	{
 		LOG_ERR("Unable to parse the the AGPS");
