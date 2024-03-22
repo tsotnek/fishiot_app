@@ -1,0 +1,3 @@
+- name: Zephyr West
+uses: zmkfirmware/zephyr-west-action@v0.3.3
+            
