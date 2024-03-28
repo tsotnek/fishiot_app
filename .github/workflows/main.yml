@@ -4,48 +4,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: checkout
-        uses: actions/checkout@v3
-      - name: Cache west modules
-        uses: actions/cache@v2
-        env:
-          cache-name: cache-zephyr-modules
-        with:
-          path: |
-            modules/
-            tools/
-            zephyr/
-            bootloader/
-          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('app/west.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-build-${{ env.cache-name }}-
-            ${{ runner.os }}-build-
-            ${{ runner.os }}-
-      - name: West Init
-        uses: zmkfirmware/zephyr-west-action@v0.1.0
-        id: west-init
-        with:
-          command: 'init'
-          command-args: '-l app'
-      - name: West Update
-        uses: zmkfirmware/zephyr-west-action@v0.1.0
-        id: west-update
-        with:
-          command: 'update'
-      - name: West Config Zephyr Base
-        uses: zmkfirmware/zephyr-west-action@v0.1.0
-        id: west-config
-        with:
-          command: 'config'
-          command-args: '--global zephyr.base-prefer configfile'
-      - name: West Zephyr Export
-        uses: zmkfirmware/zephyr-west-action@v0.1.0
-        id: west-zephyr-export
-        with:
-          command: 'zephyr-export'
-      - name: West Build
-        uses: zmkfirmware/zephyr-west-action@v0.1.0
-        id: west-build
-        with:
-          command: 'build'
-          command-args: '-s app'
+      - name: Update
+        run: |
+          sudo apt update
+          sudo apt upgrade
+          wget https://apt.kitware.com/kitware-archive.sh
+          sudo bash kitware-archive.sh
+      - name: dependencies
+        run: |
+          sudo apt install --no-install-recommends git cmake ninja-build gperf \
+          ccache dfu-util device-tree-compiler wget \
+          python3-dev python3-pip python3-setuptools python3-tk python3-wheel xz-utils file \
+          make gcc gcc-multilib g++-multilib libsdl2-dev libmagic1
+      - name: python
+        run: |
+          sudo apt install python3-venv
+          python3 -m venv ~/zephyrproject/.venv
+          source ~/zephyrproject/.venv/bin/activate
+          pip install west
+          west init ~/zephyrproject
+          cd ~/zephyrproject
+          west update
+          west zephyr-export
+          pip install -r ~/zephyrproject/zephyr/scripts/requirements.txt
+
