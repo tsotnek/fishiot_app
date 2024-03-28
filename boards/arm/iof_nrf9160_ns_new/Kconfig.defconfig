@@ -1,0 +1,10 @@
+# Copyright (c) 2024 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_IOF_NRF9160_NS_NEW
+
+config BOARD
+	default "iof_nrf9160_ns_new"
+
+
+endif

@@ -1,8 +1,18 @@
+/*
+* FishIoT Main Application
+* MCU:nRF9160
+*
+* Author: Tsotne Karchava
+* Created: 10.10.2023
+*/
+
+
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/kernel.h>
-
-// #include <zephyr/net/mqtt.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
 //nrf cloud and agps
 #include <net/nrf_cloud.h>
 #include <net/nrf_cloud_agnss.h>
@@ -16,18 +26,38 @@
 #include <modem/nrf_modem_lib.h>
 #include <modem/lte_lc.h>
 #include <zephyr/net/socket.h>
-
-#include <dk_buttons_and_leds.h>
+#include <zephyr/drivers/i2c.h>
+// #include <dk_buttons_and_leds.h>
 //header file for the GNSS interface.
 #include <nrf_modem_gnss.h>
 #include "gnss_connection.h"
 //header file for MQTT
 #include <zephyr/net/mqtt.h>
 #include "mqtt_connection.h"
-
+#include "rtc.h"
 
 #define STACKSIZE 1024
 #define THREAD0_PRIORITY 7
+
+//switches
+#define SW0_NODE	DT_ALIAS(sw0)
+#define SW1_NODE	DT_ALIAS(sw1)
+static const struct gpio_dt_spec button1 = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
+static const struct gpio_dt_spec button2 = GPIO_DT_SPEC_GET(SW1_NODE, gpios);
+
+#define LED2_NODE DT_ALIAS(led2)
+static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
+#define LED3_NODE DT_ALIAS(led3)
+static const struct gpio_dt_spec led3 = GPIO_DT_SPEC_GET(LED3_NODE, gpios);
+
+
+void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+	// BIT(button1.pin)
+}
+
+
+static struct gpio_callback button_cb_data;
 
 
 
@@ -55,10 +85,10 @@ LOG_MODULE_REGISTER(FishIoT, LOG_LEVEL_INF);
 
 
 
-
 //Function prototypes
 static int modem_configure(void);
 void mqtt_thread(void);
+static int led_button_init(void);
 //handlers
 void gnss_event_handler(int event);
 static void lte_handler(const struct lte_lc_evt *const evt);
@@ -131,7 +161,7 @@ void gnss_event_handler(int event)
 			return;
 		}
 		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
-			dk_set_led_on(DK_LED1);
+			gpio_pin_set_dt(&led2,true);
 			print_fix_data(&pvt_data);
 			/* Print the time to first fix */
 			if (!first_fix) {
@@ -246,22 +276,86 @@ do_connect:
 }
 
 
+static int led_button_init(void){
+
+	int ret;
+
+	if (!device_is_ready(led2.port)) {
+		return -1;
+	}
+	if (!device_is_ready(led3.port)) {
+		return -1;
+	}
+
+	if (!device_is_ready(button1.port)) {
+		return -1;
+	}
+
+	if (!device_is_ready(button2.port)) {
+		return -1;
+	}
+
+	ret = gpio_pin_configure_dt(&led2, GPIO_OUTPUT_ACTIVE);
+	if (ret < 0) {
+		return -1;
+	}
+	ret = gpio_pin_configure_dt(&led3, GPIO_OUTPUT_ACTIVE);
+	if (ret < 0) {
+		return -1;
+	}
+
+	/* STEP 5 - Configure the pin connected to the button to be an input pin and set its hardware specifications */
+	ret = gpio_pin_configure_dt(&button1, GPIO_INPUT);
+	if (ret < 0) {
+		return -1;
+	}
+	ret = gpio_pin_configure_dt(&button2, GPIO_INPUT);
+	if (ret < 0) {
+		return -1;
+	}
+
+	ret = gpio_pin_interrupt_configure_dt(&button1, GPIO_INT_EDGE_TO_ACTIVE);
+	ret = gpio_pin_interrupt_configure_dt(&button2, GPIO_INT_EDGE_TO_ACTIVE);
+
+    gpio_init_callback(&button_cb_data, button_pressed, BIT(button1.pin)); 	
+    gpio_init_callback(&button_cb_data, button_pressed, BIT(button2.pin)); 	
+
+	gpio_add_callback(button1.port, &button_cb_data);
+	gpio_add_callback(button2.port, &button_cb_data);
+
+	return 0;
+}
+
 int main(void)
 {
 	int err;
-	printk("Enabling modem...\n");
+	printk("Starting Application IoF...\n");
 	
-	if (dk_leds_init() != 0) {
-		LOG_ERR("Failed to initialize the LED library");
+	if(led_button_init() != 0){
+		LOG_ERR("Failed to initialize LED and Buttons");
 		return 1;
 	}
+	
+	if(rtc_init()!=0){
+		LOG_ERR("Failed to initialize RTC");
+		return 1;
+	};
 
+	//read temperature
+	int16_t temperature = rtc_read_temp();
+	printk("Temperature of RTC is %d", temperature);
+
+
+	printk("Enabling modem...\n");
 	err = modem_configure();
 	if (err) {
 		LOG_ERR("Failed to configure the modem");
 		return 1;
 	}
-
+	printk("Enabling leds..\n");
+	gpio_pin_toggle_dt(&led3);
+	gpio_pin_toggle_dt(&led2);
+	// gpio_pin_set_dt(&led3,true);
 	k_sleep(K_SECONDS(10));
 
 	// k_sem_give(&mqtt_pub_sem);
@@ -330,7 +424,7 @@ static int modem_configure(void)
 	if(err){
 		LOG_ERR("Date time update handler failed");
 	}	
-	dk_set_led_on(DK_LED2);
+	gpio_pin_set_dt(&led2,true);
 	LOG_INF("Waiting for current time");	
 	/* Wait for an event from the Date Time library. */
 	k_sem_take(&time_sem, K_MINUTES(10));

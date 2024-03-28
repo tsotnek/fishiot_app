@@ -7,13 +7,13 @@
 #include <zephyr/net/mqtt.h>
 #include <nrf_modem_at.h>
 #include <zephyr/logging/log.h>
-#include <dk_buttons_and_leds.h>
+// #include <dk_buttons_and_leds.h>
 #include "mqtt_connection.h"
+
 
 /* Buffers for MQTT client. */
 static uint8_t rx_buffer[CONFIG_MQTT_MESSAGE_BUFFER_SIZE];
 static uint8_t tx_buffer[CONFIG_MQTT_MESSAGE_BUFFER_SIZE];
-static uint8_t payload_buf[CONFIG_MQTT_PAYLOAD_BUFFER_SIZE];
 
 /* MQTT Broker details. */
 static struct sockaddr_storage broker;
@@ -60,8 +60,6 @@ int data_publish(struct mqtt_client *c, enum mqtt_qos qos,
 void mqtt_evt_handler(struct mqtt_client *const c,
 		      const struct mqtt_evt *evt)
 {
-	int err;
-
 	switch (evt->type) {
 	case MQTT_EVT_CONNACK:
 	/* STEP 5 - Subscribe to the topic CONFIG_MQTT_SUB_TOPIC when we have a successful connection */
