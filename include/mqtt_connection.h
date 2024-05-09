@@ -1,5 +1,9 @@
 #ifndef _MQTTCONNECTION_H_
 #define _MQTTCONNECTION_H_
+
+#include <zephyr/net/mqtt.h>
+
+
 #define LED_CONTROL_OVER_MQTT          DK_LED1 /*The LED to control over MQTT*/
 #define IMEI_LEN 15
 #define CGSN_RESPONSE_LENGTH (IMEI_LEN + 6 + 1) /* Add 6 for \r\nOK\r\n and 1 for \0 */

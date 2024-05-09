@@ -17,12 +17,33 @@ LOG_MODULE_DECLARE(FishIoT);
 int64_t gnss_start_time;
 //PVT data frame variables,
 struct nrf_modem_gnss_pvt_data_frame pvt_data;
+/*Helper variables to find the TTFF */
+bool first_fix = false;
+
+
+
 
 static char recv_buffer[2048];
 static char agps_data_buf[3500];
 static char jwt_buf[600];
 
-// int64_t gnss_start_time;
+static char str[150];
+void data_formatter(struct nrf_modem_gnss_pvt_data_frame *pvt_data){
+	memset(str, 0, sizeof(str));
+	strcat(str, "Latitude: ");
+	char temporary[20];
+	strcat(str, "\r\nLongitude: ");
+	sprintf(temporary, "%.06f", pvt_data->longitude);
+	strcat(str, temporary);
+	
+	sprintf(temporary, "%.06f", pvt_data->latitude);	
+	strcat(str, temporary);
+
+
+	strcat(str, "\r\nAltitude: ");
+	sprintf(temporary, "%.01f", pvt_data->altitude);
+	strcat(str, temporary);
+}
 
 
 void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)

@@ -9,16 +9,12 @@
 
 #include <stdio.h>
 #include <string.h>
-// #include <zephyr/kernel.h>
-// #include <zephyr/device.h>
-// #include <zephyr/devicetree.h>
-// #include <zephyr/drivers/gpio.h>
 //nrf cloud and agps
 #include <net/nrf_cloud.h>
 #include <net/nrf_cloud_agnss.h>
+#include <net/nrf_cloud_rest.h>
 #include <zephyr/logging/log.h>
 #include <date_time.h>
-#include <net/nrf_cloud_rest.h>
 #include <time.h>
 #include <modem/modem_info.h>
 #include <modem/modem_jwt.h>
@@ -26,14 +22,10 @@
 #include <modem/nrf_modem_lib.h>
 #include <modem/lte_lc.h>
 #include <zephyr/net/socket.h>
-#include <zephyr/drivers/i2c.h>
-// #include <dk_buttons_and_leds.h>
+
 //header file for the GNSS interface.
 #include "gnss_connection.h"
-// #include <nrf_modem_gnss.h>
 //header file for MQTT
-#include <zephyr/net/mqtt.h>
-#include <zephyr/drivers/uart.h>
 #include "mqtt_connection.h"
 #include "rtc.h"
 #include "rs485.h"
@@ -65,11 +57,6 @@ static struct pollfd fds;
 
 
 
-
-/*Helper variables to find the TTFF */
-static bool first_fix = false;
-
-
 //semaphores
 static K_SEM_DEFINE(lte_connected, 0, 1);
 static K_SEM_DEFINE(time_sem, 0, 1);
@@ -88,19 +75,25 @@ extern const struct device *uart;
 
 //Function prototypes
 static int modem_configure(void);
+
+//threads
 void mqtt_thread(void);
 void rtc_thread(void);
 void rtc_datetime_button(void);
 
 //handlers
-void gnss_event_handler(int event);
 static void lte_handler(const struct lte_lc_evt *const evt);
+
+
+//thread definitions
 K_THREAD_DEFINE(mqtt_pub_id, STACKSIZE, mqtt_thread, NULL, NULL, NULL,
 		THREAD0_PRIORITY, 0, 0);
 K_THREAD_DEFINE(rtcthread, STACKSIZE, rtc_thread, NULL, NULL, NULL,
 		THREAD1_PRIORITY, 0, 0);
 K_THREAD_DEFINE(rtctimebutton, STACKSIZE, rtc_datetime_button, NULL, NULL, NULL,
 		THREAD2_PRIORITY, 0, 0);
+
+
 
 static void date_time_evt_handler(const struct date_time_evt *evt)
 {
@@ -200,24 +193,6 @@ void gnss_event_handler(int event)
 		break;
 	}
 }
-static char str[150];
-//helper function
-void data_formatter(struct nrf_modem_gnss_pvt_data_frame *pvt_data){
-	memset(str, 0, sizeof(str));
-	strcat(str, "Latitude: ");
-	char temporary[20];
-	strcat(str, "\r\nLongitude: ");
-	sprintf(temporary, "%.06f", pvt_data->longitude);
-	strcat(str, temporary);
-	
-	sprintf(temporary, "%.06f", pvt_data->latitude);	
-	strcat(str, temporary);
-
-
-	strcat(str, "\r\nAltitude: ");
-	sprintf(temporary, "%.01f", pvt_data->altitude);
-	strcat(str, temporary);
-}
 
 
 //THREAD
@@ -273,8 +248,8 @@ do_connect:
 		LOG_ERR("POLLNVAL");
 	}
 	data_formatter(&pvt_data);
-	err = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE,
-		str, strlen(str));
+	// err = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE,
+	// 	str, strlen(str));
 	if (err) {
 		LOG_INF("Failed to send message, %d", err);
 	}
@@ -339,15 +314,10 @@ int main(void)
 	};
 
    
-	// //read temperature
+	//read temperature
 	volatile int16_t temperature = rtc_read_temp();
 	printk("Temperature of RTC is %d\n", temperature);
-	// //test for time
 
-	// gpio_pin_toggle_dt(&led3);
-	// gpio_pin_toggle_dt(&led2);
-	// gpio_pin_toggle_dt(&led0);
-	// gpio_pin_toggle_dt(&led1);
 
 	// err = rs485_init();
 	// if(err)

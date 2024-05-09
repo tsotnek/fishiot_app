@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <nrf_modem_gnss.h>
+#include <zephyr/drivers/i2c.h>
 
 #define RTC_EEPROM_PMU      0xC0
 #define RTC_EEPROM_Offset   0xC1
