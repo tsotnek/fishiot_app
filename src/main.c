@@ -9,10 +9,10 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <zephyr/kernel.h>
-#include <zephyr/device.h>
-#include <zephyr/devicetree.h>
-#include <zephyr/drivers/gpio.h>
+// #include <zephyr/kernel.h>
+// #include <zephyr/device.h>
+// #include <zephyr/devicetree.h>
+// #include <zephyr/drivers/gpio.h>
 //nrf cloud and agps
 #include <net/nrf_cloud.h>
 #include <net/nrf_cloud_agnss.h>
@@ -29,14 +29,16 @@
 #include <zephyr/drivers/i2c.h>
 // #include <dk_buttons_and_leds.h>
 //header file for the GNSS interface.
-#include <nrf_modem_gnss.h>
 #include "gnss_connection.h"
+// #include <nrf_modem_gnss.h>
 //header file for MQTT
 #include <zephyr/net/mqtt.h>
+#include <zephyr/drivers/uart.h>
 #include "mqtt_connection.h"
 #include "rtc.h"
 #include "rs485.h"
-#include <zephyr/drivers/uart.h>
+#include "leds.h"
+
 
 
 
@@ -45,27 +47,9 @@ LOG_MODULE_REGISTER(FishIoT, LOG_LEVEL_INF);
 #define THREAD0_PRIORITY 7
 #define THREAD1_PRIORITY 2
 #define THREAD2_PRIORITY 1
-//switches
-#define SW0_NODE	DT_ALIAS(sw0)
-#define SW1_NODE	DT_ALIAS(sw1)
-static const struct gpio_dt_spec button1 = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
-static const struct gpio_dt_spec button2 = GPIO_DT_SPEC_GET(SW1_NODE, gpios);
 
 
 
-
-#define LED0_NODE DT_ALIAS(led0)
-static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
-#define LED1_NODE DT_ALIAS(led1)
-static const struct gpio_dt_spec led1 = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
-#define LED2_NODE DT_ALIAS(led2)
-static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
-#define LED3_NODE DT_ALIAS(led3)
-static const struct gpio_dt_spec led3 = GPIO_DT_SPEC_GET(LED3_NODE, gpios);
-
-
-
-static struct gpio_callback button_cb_data;
 rtc_time_dec_t rtc_time;
 rtc_time_bcd_t time_bcd;
 
@@ -80,18 +64,13 @@ static struct mqtt_client client;
 static struct pollfd fds;
 
 
-//GNSS
-extern int64_t gnss_start_time;
-//PVT data frame variables,
-struct nrf_modem_gnss_pvt_data_frame pvt_data;
+
+
 /*Helper variables to find the TTFF */
 static bool first_fix = false;
 
 
-//RS485
-
-
-
+//semaphores
 static K_SEM_DEFINE(lte_connected, 0, 1);
 static K_SEM_DEFINE(time_sem, 0, 1);
 static K_SEM_DEFINE(mqtt_pub_sem, 0, 1);
@@ -108,12 +87,11 @@ extern const struct device *uart;
 
 
 //Function prototypes
-void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 static int modem_configure(void);
 void mqtt_thread(void);
 void rtc_thread(void);
 void rtc_datetime_button(void);
-static int led_button_init(void);
+
 //handlers
 void gnss_event_handler(int event);
 static void lte_handler(const struct lte_lc_evt *const evt);
@@ -189,7 +167,7 @@ void gnss_event_handler(int event)
 			return;
 		}
 		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
-			gpio_pin_set_dt(&led2,true);
+			LED_ON(BOARD_LED2);
 			print_fix_data(&pvt_data);
 			// rtc_sync_nav_second();
 
@@ -344,74 +322,6 @@ void rtc_datetime_button(void){
 }
 
 
-static int led_button_init(void){
-
-	int ret;
-
-	if (!gpio_is_ready_dt(&led0)) {
-		return -1;
-	}
-
-	if (!gpio_is_ready_dt(&led1)) {
-		return -1;
-	}
-
-	if (!gpio_is_ready_dt(&led2)) {
-		return -1;
-	}
-	if (!gpio_is_ready_dt(&led3)) {
-		return -1;
-	}
-
-	if (!gpio_is_ready_dt(&button1)) {
-		return -1;
-	}
-
-	if (!gpio_is_ready_dt(&button2)) {
-		return -1;
-	}
-
-
-	ret = gpio_pin_configure_dt(&led0, GPIO_OUTPUT_ACTIVE);
-	if (ret < 0) {
-		return -1;
-	}
-
-	ret = gpio_pin_configure_dt(&led1, GPIO_OUTPUT_ACTIVE);
-	if (ret < 0) {
-		return -1;
-	}
-
-	ret = gpio_pin_configure_dt(&led2, GPIO_OUTPUT_ACTIVE);
-	if (ret < 0) {
-		return -1;
-	}
-	ret = gpio_pin_configure_dt(&led3, GPIO_OUTPUT_ACTIVE);
-	if (ret < 0) {
-		return -1;
-	}
-
-	/* STEP 5 - Configure the pin connected to the button to be an input pin and set its hardware specifications */
-	ret = gpio_pin_configure_dt(&button1, GPIO_INPUT);
-	if (ret < 0) {
-		return -1;
-	}
-	ret = gpio_pin_configure_dt(&button2, GPIO_INPUT);
-	if (ret < 0) {
-		return -1;
-	}
-
-	ret = gpio_pin_interrupt_configure_dt(&button1, GPIO_INT_EDGE_TO_ACTIVE);
-	ret = gpio_pin_interrupt_configure_dt(&button2, GPIO_INT_EDGE_TO_ACTIVE);
-
-    gpio_init_callback(&button_cb_data, button_pressed, BIT(button1.pin)); 	
-    gpio_init_callback(&button_cb_data, button_pressed, BIT(button2.pin)); 	
-
-	gpio_add_callback(button1.port, &button_cb_data);
-	gpio_add_callback(button2.port, &button_cb_data);
-
-	return 0;
-}
 
 int main(void)
 {
@@ -434,10 +344,10 @@ int main(void)
 	printk("Temperature of RTC is %d\n", temperature);
 	// //test for time
 
-	gpio_pin_toggle_dt(&led3);
-	gpio_pin_toggle_dt(&led2);
-	gpio_pin_toggle_dt(&led0);
-	gpio_pin_toggle_dt(&led1);
+	// gpio_pin_toggle_dt(&led3);
+	// gpio_pin_toggle_dt(&led2);
+	// gpio_pin_toggle_dt(&led0);
+	// gpio_pin_toggle_dt(&led1);
 
 	// err = rs485_init();
 	// if(err)
@@ -511,8 +421,9 @@ static int modem_configure(void)
 	if(err){
 		LOG_ERR("Date time update handler failed");
 	}	
-	gpio_pin_set_dt(&led2,true);
-	
+
+	LED_ON(BOARD_LED0);
+
 	LOG_INF("Waiting for current time");	
 	/* Wait for an event from the Date Time library. */
 	k_sem_take(&time_sem, K_MINUTES(10));
@@ -531,9 +442,3 @@ static int modem_configure(void)
 }
 
 
-void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-	// BIT(button1.pin)
-	LOG_INF("Button pressed\n");
-	k_sem_give(&time_read_sem);
-}

@@ -9,6 +9,7 @@ target_sources(app PRIVATE src/mqtt_connection.c)
 target_sources(app PRIVATE src/gnss_connection.c)
 target_sources(app PRIVATE src/rtc.c)
 target_sources(app PRIVATE src/rs485.c)
+target_sources(app PRIVATE src/leds.c)
 target_sources(app PRIVATE src/main.c)
 
 

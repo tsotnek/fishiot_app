@@ -12,11 +12,17 @@
 
 LOG_MODULE_DECLARE(FishIoT);
 
+
+//GNSS
+int64_t gnss_start_time;
+//PVT data frame variables,
+struct nrf_modem_gnss_pvt_data_frame pvt_data;
+
 static char recv_buffer[2048];
 static char agps_data_buf[3500];
 static char jwt_buf[600];
 
-int64_t gnss_start_time;
+// int64_t gnss_start_time;
 
 
 void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
