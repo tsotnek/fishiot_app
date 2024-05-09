@@ -35,30 +35,42 @@
 #include <zephyr/net/mqtt.h>
 #include "mqtt_connection.h"
 #include "rtc.h"
+#include "rs485.h"
+#include <zephyr/drivers/uart.h>
 
+
+
+LOG_MODULE_REGISTER(FishIoT, LOG_LEVEL_INF);
 #define STACKSIZE 1024
 #define THREAD0_PRIORITY 7
-
+#define THREAD1_PRIORITY 2
+#define THREAD2_PRIORITY 1
 //switches
 #define SW0_NODE	DT_ALIAS(sw0)
 #define SW1_NODE	DT_ALIAS(sw1)
 static const struct gpio_dt_spec button1 = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 static const struct gpio_dt_spec button2 = GPIO_DT_SPEC_GET(SW1_NODE, gpios);
 
+
+
+
+#define LED0_NODE DT_ALIAS(led0)
+static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+#define LED1_NODE DT_ALIAS(led1)
+static const struct gpio_dt_spec led1 = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
 #define LED2_NODE DT_ALIAS(led2)
 static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 #define LED3_NODE DT_ALIAS(led3)
 static const struct gpio_dt_spec led3 = GPIO_DT_SPEC_GET(LED3_NODE, gpios);
 
 
-void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-	// BIT(button1.pin)
-}
-
 
 static struct gpio_callback button_cb_data;
+rtc_time_dec_t rtc_time;
+rtc_time_bcd_t time_bcd;
 
+
+uint8_t RS485_SN[14];
 
 
 //MQTT
@@ -75,26 +87,42 @@ struct nrf_modem_gnss_pvt_data_frame pvt_data;
 /*Helper variables to find the TTFF */
 static bool first_fix = false;
 
+
+//RS485
+
+
+
 static K_SEM_DEFINE(lte_connected, 0, 1);
 static K_SEM_DEFINE(time_sem, 0, 1);
 static K_SEM_DEFINE(mqtt_pub_sem, 0, 1);
 static K_SEM_DEFINE(mqtt_pub_thread_start, 0, 1);
 static K_SEM_DEFINE(gnss_start_sem, 0, 1);
 
-LOG_MODULE_REGISTER(FishIoT, LOG_LEVEL_INF);
+
+static K_SEM_DEFINE(time_read_sem, 0, 1);
+static K_SEM_DEFINE(rtc_write_fix_sem, 0, 1);
+static K_SEM_DEFINE(rtc_esyn_sem, 0, 1);
+
+extern const struct device *uart;
 
 
 
 //Function prototypes
+void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 static int modem_configure(void);
 void mqtt_thread(void);
+void rtc_thread(void);
+void rtc_datetime_button(void);
 static int led_button_init(void);
 //handlers
 void gnss_event_handler(int event);
 static void lte_handler(const struct lte_lc_evt *const evt);
 K_THREAD_DEFINE(mqtt_pub_id, STACKSIZE, mqtt_thread, NULL, NULL, NULL,
 		THREAD0_PRIORITY, 0, 0);
-
+K_THREAD_DEFINE(rtcthread, STACKSIZE, rtc_thread, NULL, NULL, NULL,
+		THREAD1_PRIORITY, 0, 0);
+K_THREAD_DEFINE(rtctimebutton, STACKSIZE, rtc_datetime_button, NULL, NULL, NULL,
+		THREAD2_PRIORITY, 0, 0);
 
 static void date_time_evt_handler(const struct date_time_evt *evt)
 {
@@ -163,10 +191,16 @@ void gnss_event_handler(int event)
 		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
 			gpio_pin_set_dt(&led2,true);
 			print_fix_data(&pvt_data);
+			// rtc_sync_nav_second();
+
 			/* Print the time to first fix */
 			if (!first_fix) {
 				LOG_INF("Time to first fix: %2.1lld s", (k_uptime_get() - gnss_start_time)/1000);
 				first_fix = true;
+				k_sem_give(&rtc_write_fix_sem);
+			}
+			else{
+				k_sem_give(&rtc_esyn_sem);
 			}
 			
 			return;
@@ -194,12 +228,13 @@ void data_formatter(struct nrf_modem_gnss_pvt_data_frame *pvt_data){
 	memset(str, 0, sizeof(str));
 	strcat(str, "Latitude: ");
 	char temporary[20];
-	sprintf(temporary, "%.06f", pvt_data->latitude);	
-	strcat(str, temporary);
-
 	strcat(str, "\r\nLongitude: ");
 	sprintf(temporary, "%.06f", pvt_data->longitude);
 	strcat(str, temporary);
+	
+	sprintf(temporary, "%.06f", pvt_data->latitude);	
+	strcat(str, temporary);
+
 
 	strcat(str, "\r\nAltitude: ");
 	sprintf(temporary, "%.01f", pvt_data->altitude);
@@ -276,22 +311,74 @@ do_connect:
 }
 
 
+//thread
+void rtc_thread(void){
+
+
+	k_sem_take(&rtc_write_fix_sem, K_FOREVER);
+	LOG_INF("Writing NAV time and data");
+	rtc_write_fix_data_first(&pvt_data);
+	while(1){
+		k_sem_take(&rtc_esyn_sem, K_FOREVER);
+		rtc_sync_nav_second();
+	}
+
+}
+
+
+void rtc_datetime_button(void){
+	char* weekdayarr[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+	int err;
+	for(;;){
+		k_sem_take(&time_read_sem,K_FOREVER);
+		volatile int16_t temperature = rtc_read_temp();
+		printk("Temperature of RTC is %d\n", temperature);
+		// err = rtc_read_time_data();
+		// if (err != 0){
+		// 	LOG_ERR("Failed to read date from RTC\n");
+		// }
+		// LOG_INF("Today is %s, Time: %d:%d:%d\n", weekdayarr[rtc_time.weekday], rtc_time.hour, \
+		// 									rtc_time.minute, rtc_time.seconds);
+
+	}
+}
+
+
 static int led_button_init(void){
 
 	int ret;
 
-	if (!device_is_ready(led2.port)) {
-		return -1;
-	}
-	if (!device_is_ready(led3.port)) {
+	if (!gpio_is_ready_dt(&led0)) {
 		return -1;
 	}
 
-	if (!device_is_ready(button1.port)) {
+	if (!gpio_is_ready_dt(&led1)) {
 		return -1;
 	}
 
-	if (!device_is_ready(button2.port)) {
+	if (!gpio_is_ready_dt(&led2)) {
+		return -1;
+	}
+	if (!gpio_is_ready_dt(&led3)) {
+		return -1;
+	}
+
+	if (!gpio_is_ready_dt(&button1)) {
+		return -1;
+	}
+
+	if (!gpio_is_ready_dt(&button2)) {
+		return -1;
+	}
+
+
+	ret = gpio_pin_configure_dt(&led0, GPIO_OUTPUT_ACTIVE);
+	if (ret < 0) {
+		return -1;
+	}
+
+	ret = gpio_pin_configure_dt(&led1, GPIO_OUTPUT_ACTIVE);
+	if (ret < 0) {
 		return -1;
 	}
 
@@ -341,40 +428,40 @@ int main(void)
 		return 1;
 	};
 
-	//read temperature
-	int16_t temperature = rtc_read_temp();
-	printk("Temperature of RTC is %d", temperature);
+   
+	// //read temperature
+	volatile int16_t temperature = rtc_read_temp();
+	printk("Temperature of RTC is %d\n", temperature);
+	// //test for time
 
-
-	printk("Enabling modem...\n");
-	err = modem_configure();
-	if (err) {
-		LOG_ERR("Failed to configure the modem");
-		return 1;
-	}
-	printk("Enabling leds..\n");
 	gpio_pin_toggle_dt(&led3);
 	gpio_pin_toggle_dt(&led2);
-	// gpio_pin_set_dt(&led3,true);
-	k_sleep(K_SECONDS(10));
+	gpio_pin_toggle_dt(&led0);
+	gpio_pin_toggle_dt(&led1);
 
-	// k_sem_give(&mqtt_pub_sem);
-	err = agps_receive_process_data();
-	if(err){
-		LOG_ERR("Failed to receive and process AGPS data");
-		return 1;
-	}
+	// err = rs485_init();
+	// if(err)
+	// 	return 1;
 
+	// printk("Enabling modem...\n");
+	// err = modem_configure();
+	// if (err) {
+	// 	LOG_ERR("Failed to configure the modem");
+	// 	return 1;
+	// }
 	
-	
-	k_sem_take(&gnss_start_sem, K_FOREVER);
-	if (gnss_init_and_start() != 0) {
-		LOG_ERR("Failed to initialize and start GNSS");
-		return 1;
-	}
-	
-	
-	
+	// err = agps_receive_process_data();
+	// if(err){
+	// 	LOG_ERR("Failed to receive and process AGPS data");
+	// 	return 1;
+	// }
+
+	// k_sem_take(&gnss_start_sem, K_FOREVER);
+	// if (gnss_init_and_start() != 0) {
+	// 	LOG_ERR("Failed to initialize and start GNSS");
+	// 	return 1;
+	// }	
+
 	return 0;
 }
 
@@ -425,6 +512,7 @@ static int modem_configure(void)
 		LOG_ERR("Date time update handler failed");
 	}	
 	gpio_pin_set_dt(&led2,true);
+	
 	LOG_INF("Waiting for current time");	
 	/* Wait for an event from the Date Time library. */
 	k_sem_take(&time_sem, K_MINUTES(10));
@@ -432,6 +520,20 @@ static int modem_configure(void)
 	if (!date_time_is_valid()) {
 		LOG_WRN("Failed to get current time, continuing anyway");
 	}
+	int64_t datetime;
+	datetime = k_uptime_get();
+	err = date_time_uptime_to_unix_time_ms(&datetime);
+	if(err){
+		LOG_ERR("Failed to get Date time");
+	}	
 	LOG_INF("Received current time successfully!");
 	return 0;
+}
+
+
+void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+	// BIT(button1.pin)
+	LOG_INF("Button pressed\n");
+	k_sem_give(&time_read_sem);
 }

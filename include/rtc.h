@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <nrf_modem_gnss.h>
 
 #define RTC_EEPROM_PMU      0xC0
 #define RTC_EEPROM_Offset   0xC1
@@ -119,12 +120,40 @@
 #define RTC_ENABLE_CLKOUT 1
 
 
+
+//months
+typedef enum{
+JANUARY   = 0,
+FEBRUARY  = 3,
+MARCH     = 3,
+APRIL     = 6,
+MAY       = 1,
+JUNE      = 4,
+JULY      = 6,
+AUGUST    = 2,
+SEPTEMBER = 5,
+OCTOBER   = 0, 
+NOVEMBER  = 3,
+DECEMBER  = 5
+} rtc_months;
+//weekdays
+typedef enum{
+  SUNDAY,
+  MONDAY,
+  TUESDAY,
+  WEDNESDAY,
+  THURSDAY,
+  FRIDAY,
+  SATURDAY
+} rtc_weekdays;
+
+
 typedef struct {
   bool    valid_time;
 
   uint8_t  year;
   uint8_t  month;
-  uint8_t  date;
+  uint8_t  day;
   uint8_t  weekday;
   uint8_t  hour;
   uint8_t  min;
@@ -138,11 +167,11 @@ typedef struct {
 
   uint8_t  year;
   uint8_t  month;
-  uint8_t  date;
+  uint8_t  day;
   uint8_t  weekday;
   uint8_t  hour;
-  uint8_t  min;
-  uint8_t  sec;
+  uint8_t  minute;
+  uint8_t  seconds;
   uint8_t  sec100;
 
 } rtc_time_dec_t;
@@ -156,11 +185,11 @@ typedef struct {
 // uint8_t rtc_start_sync_with_gps;
 // uint8_t rtc_second_offset_to_gps;
 
-int rtc_init(void);
+uint8_t rtc_init(void);
 int16_t rtc_read_temp(void);
 
-void rtc_i2c_write(uint8_t address, uint8_t data);
-// void rtc_i2c_write_array(uint8_t address, uint8_t data[], uint8_t num_data_bytes);
+uint8_t rtc_i2c_write(uint8_t address, uint8_t data);
+uint8_t rtc_i2c_write_datetime(rtc_time_bcd_t datetime);
 uint8_t rtc_i2c_read(uint8_t address, uint8_t num_bytes);
 // void rtc_read_than_write(uint8_t address, uint8_t data, uint8_t positive);
 void rtc_reset_eeprom();
@@ -169,20 +198,25 @@ void rtc_reset();
 // void rtc_sync();
 // void rtc_convert_nav_data_into_bcd_format(nav_data_t nav_data);
 // void rtc_synchronize_seconds();
-// rtc_time_bcd_t rtc_read_time_data();
+uint8_t rtc_read_time_data(void);
 // void rtc_write_time_data(rtc_time_bcd_t time_data, uint8_t bytes, uint8_t offset);
 // void rtc_write_time_data_stop(rtc_time_bcd_t time_data, uint8_t bytes);
 // void rtc_write_time_data_esyn(rtc_time_bcd_t time_data, uint8_t bytes);
 
-// void rtc_evi_init();
+void rtc_evi_init();
 // void rtc_generate_evi_interrupt();
 // void rtc_clear_time_stamp_evi();
 // rtc_time_bcd_t rtc_read_time_stamp_evi();
 
 // rtc_time_dec_t rtc_convert_time_struct_bcd_to_decimal(rtc_time_bcd_t time_bcd);
 // rtc_time_bcd_t rtc_convert_time_struct_decimal_to_bcd(rtc_time_dec_t time_dec);
-// uint8_t rtc_convert_bcd_to_decimal(uint8_t time_bcd);
-// uint8_t rtc_convert_decimal_to_bcd(uint8_t time_dec);
+uint8_t rtc_convert_bcd_to_decimal(uint8_t time_bcd);
+uint8_t rtc_convert_decimal_to_bcd(uint8_t time_dec);
 
-// void rtc_convert_nav_data_into_bcd_format(nav_data_t nav_data);
+uint8_t rtc_convert_nav_data_into_bcd_format(rtc_time_dec_t datetime);
+
+uint8_t rtc_write_fix_data_first(struct nrf_modem_gnss_pvt_data_frame *pvt_data);
+uint8_t rtc_sync_nav_second(void);
+
+
 #endif
