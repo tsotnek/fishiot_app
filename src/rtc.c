@@ -22,8 +22,8 @@ static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C0_NODE);
 
 //global variables
 uint8_t i2c_ReceiveBuffer[10];
-extern rtc_time_dec_t rtc_time;
-extern rtc_time_bcd_t time_bcd;
+rtc_time_dec_t rtc_time;
+rtc_time_bcd_t time_bcd;
 
 uint8_t rtc_init(void){
 
@@ -39,7 +39,7 @@ uint8_t rtc_init(void){
   // GPIO_PinModeSet(RTC_PORT, RTC_CLKOUT, gpioModeInputPull, 1);
   // GPIO_IntConfig(RTC_PORT, RTC_CLKOUT, true, false, true);        // Interrupt on rising edge
   rtc_i2c_write(RTC_EEPROM_Clkout_2, RTC_EEPROM_Clkout_2_FD_1);   // set CLKOUT to 1 Hz
-
+  rtc_i2c_write(RTC_EEPROM_PMU, RTC_EEPROM_PMU_BSM_DSM); //enable switching to VBACKUP
   // Setup synchronization with GPS time
   // rtc_convert_time_from_gps_finished = 0;
   // rtc_start_sync_with_gps = 0;

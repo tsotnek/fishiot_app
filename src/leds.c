@@ -9,13 +9,6 @@ static const struct gpio_dt_spec led1 = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
 static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 static const struct gpio_dt_spec led3 = GPIO_DT_SPEC_GET(LED3_NODE, gpios);
 
-void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-	// BIT(button1.pin)
-	// LOG_INF("Button pressed\n");
-	// k_sem_give(&time_read_sem);
-}
-
 uint8_t led_button_init(void){
 
 	uint8_t ret;
@@ -89,25 +82,6 @@ uint8_t led_button_init(void){
 void LED_ON(uint8_t LED){
     switch(LED){
         case BOARD_LED0:
-	        gpio_pin_set_dt(&led0,true);
-            break;
-        case BOARD_LED1:
-	        gpio_pin_set_dt(&led1,true);
-            break;
-        case BOARD_LED2:
-	        gpio_pin_set_dt(&led2,true);
-            break;
-        case BOARD_LED3:
-            gpio_pin_set_dt(&led3,true);
-            break;  
-        default:
-            break;
-    }
-}
-
-void LED_OFF(uint8_t LED){
-    switch(LED){
-        case BOARD_LED0:
 	        gpio_pin_set_dt(&led0,false);
             break;
         case BOARD_LED1:
@@ -118,6 +92,25 @@ void LED_OFF(uint8_t LED){
             break;
         case BOARD_LED3:
             gpio_pin_set_dt(&led3,false);
+            break;  
+        default:
+            break;
+    }
+}
+
+void LED_OFF(uint8_t LED){
+    switch(LED){
+        case BOARD_LED0:
+	        gpio_pin_set_dt(&led0,true);
+            break;
+        case BOARD_LED1:
+	        gpio_pin_set_dt(&led1,true);
+            break;
+        case BOARD_LED2:
+	        gpio_pin_set_dt(&led2,true);
+            break;
+        case BOARD_LED3:
+            gpio_pin_set_dt(&led3,true);
             break;  
         default:
             break;

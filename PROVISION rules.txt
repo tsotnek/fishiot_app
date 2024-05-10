@@ -2,8 +2,16 @@ The simplest way is to use device_credentials_installer.py script and connect to
 and automatically install credentials. 
 
 
+*IMPORTANT to edit the script in line 587 to just "ser = serial.Serial(port, 115200, timeout=serial_timeout)"
 
-IMPORTANT to edit the script in line 587 to just "ser = serial.Serial(port, 115200, timeout=serial_timeout)"
+
+
+*RUN FOLLOWING PYTHON3 COMMAND FROM THE LOCATION OF SCRIPT
+*Important to enter correct COM port
+
+python3 device_credentials_installer.py -d --ca my_ca/ca.pem --ca_key my_ca/prv.pem --verify --port COM10
+
+
 
 
 

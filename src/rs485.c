@@ -1,17 +1,17 @@
 #include "rs485.h"
-#include <zephyr/kernel.h>
-#include <zephyr/device.h>
-#include <zephyr/devicetree.h>
-#include <zephyr/drivers/gpio.h>
+#include "leds.h"
 #include <zephyr/logging/log.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
-#define MSG_SIZE 60
+
+K_SEM_DEFINE(uart_rec_sem, 0, 1);
 
 /* queue to store up to 10 messages (aligned to 4-byte boundary) */
 K_MSGQ_DEFINE(uart_msgq, MSG_SIZE, 10, 4);
 
-extern uint8_t RS485_SN;
+
 
 #define RXLOWpin DT_ALIAS(relowpin)
 #define TXHIGHpin DT_ALIAS(dehighpin)
@@ -21,9 +21,50 @@ static const struct gpio_dt_spec RXpin = GPIO_DT_SPEC_GET(RXLOWpin, gpios);
 static const struct gpio_dt_spec TXPin = GPIO_DT_SPEC_GET(TXHIGHpin, gpios);
 
 /* receive buffer used in UART ISR callback */
-static char rx_buf[MSG_SIZE];
+char rx_buf[MSG_SIZE];
 static int rx_buf_pos;
 
+uint32_t TBSN;
+
+uint8_t rs485_updatetime(uint64_t unix_time_ms){
+	unix_time_ms /= 1000; //unix time stamp
+	uint64_t time = unix_time_ms;
+	uint16_t digitSum = 0;
+	uint32_t digit = 0;
+	for(uint8_t i = 0; i < 9; i++){
+		time /= 10;
+		digit = time % 10;
+		if ((i % 2 ) == 0){
+			digit *= 2;
+		}
+		if (digit > 9 ){
+			digit -= 9;
+		}
+		digitSum += digit;
+	}
+
+	uint8_t luhnsCheckDigit = (digitSum * 9) % 10;
+
+	char rsupdatemessage[17];
+	sprintf(rsupdatemessage, "(+)%d%d\r\n", (int)unix_time_ms/10, luhnsCheckDigit);
+	print_uart(rsupdatemessage);
+	return 0;
+}
+
+uint8_t rs485_extractserialnnumber(void){
+	if(rx_buf[0]=='\0')
+		return 1;
+
+	uint8_t RS485_SN[6];
+
+	for(uint8_t i = 0; i < 6; i++){
+		RS485_SN[i] = rx_buf[i+3];
+	}
+
+	TBSN = atoi(RS485_SN);
+	memset((void *) rx_buf, 0, sizeof(rx_buf)/sizeof(char));
+	return 0;
+}
 /*
  * Read characters from UART until line end is detected. Afterwards push the
  * data to the message queue.
@@ -51,7 +92,9 @@ void serial_cb(const struct device *dev, void *user_data)
 
 			/* reset the buffer (it was copied to the msgq) */
 			rx_buf_pos = 0;
-			printk("%s\n", rx_buf);
+			//read has finished
+			if(strlen(rx_buf)>16)
+				k_sem_give(&uart_rec_sem);
 		} else if (rx_buf_pos < (sizeof(rx_buf) - 1)) {
 			if ((c != '\n') || (c != '\r')){
 				rx_buf[rx_buf_pos++] = c;
@@ -59,6 +102,8 @@ void serial_cb(const struct device *dev, void *user_data)
 		}
 		/* else: characters beyond buffer size are dropped */
 	}
+
+	
 }
 
 /*
@@ -119,20 +164,16 @@ uint8_t rs485_init(void)
 		return 0;
 	}
 	uart_irq_rx_enable(uart_dev);
-
 	print_uart("?\r\n");
 
-	// strcpy(RS485_SN, rx_buf);
-	// k_sleep(K_MSEC(100));
-	// print_uart("?\r\n");
+	k_sleep(K_MSEC(1000));
 
-	// print_uart("Tell me something and press enter:\r\n");.
+	if(rs485_extractserialnnumber()!=0){
+		printk("Error in extraction of serial number");
+		return 1;
+	}
 
-	/* indefinitely wait for input from the user */
-	// while (k_msgq_get(&uart_msgq, &tx_buf, K_FOREVER) == 0) {
-	// 	print_uart(tx_buf);
-	// 	printk("%s\n", tx_buf);
-	// }
+	printk("Serial number is %d\n", TBSN);
 	return 0;
 }
 
