@@ -7,6 +7,7 @@
 
 extern char rx_buf[MSG_SIZE];
 extern struct k_sem uart_rec_sem; 
+extern uint16_t TBSN; //tbr serial number
 
 
 uint8_t rs485_init(void);

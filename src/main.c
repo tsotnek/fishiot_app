@@ -244,10 +244,15 @@ void rs485_thread(void){
 	char *word = "TBR Sensor";
 	for(;;){
 		k_sem_take(&uart_rec_sem, K_FOREVER);
-
+		IoF_header header;
+		uint8_t strport[10];
+		header.TBRserial_and_headerflag = TBSN | (TBR_status_or_tag << 14);
+		strncpy(strport, rx_buf[9],10);
+		header.reftimestamp = atoi(strport);
+		k_msgq_put(&IoFHEADER_MSG,&header,K_FOREVER);
 		if(strstr(rx_buf,word)){
 			//log message
-			IoF_header header;
+			
 			LOG_INF("Received LOG Message on TBR: %s", rx_buf);
 		}
 		else{

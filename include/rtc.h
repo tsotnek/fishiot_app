@@ -120,8 +120,7 @@
 
 #define RTC_ENABLE_CLKOUT 1
 
-extern rtc_time_dec_t rtc_time;
-extern rtc_time_bcd_t time_bcd;
+
 
 //months
 typedef enum{
@@ -178,6 +177,9 @@ typedef struct {
 
 } rtc_time_dec_t;
 
+
+extern rtc_time_dec_t rtc_time;
+extern rtc_time_bcd_t time_bcd;
 // rtc_time_bcd_t test_time;
 
 // rtc_time_bcd_t gps_time_last_sync_bcd;

@@ -24,7 +24,7 @@ static const struct gpio_dt_spec TXPin = GPIO_DT_SPEC_GET(TXHIGHpin, gpios);
 char rx_buf[MSG_SIZE];
 static int rx_buf_pos;
 
-uint32_t TBSN;
+uint16_t TBSN;
 
 uint8_t rs485_updatetime(uint64_t unix_time_ms){
 	unix_time_ms /= 1000; //unix time stamp
@@ -57,8 +57,8 @@ uint8_t rs485_extractserialnnumber(void){
 
 	uint8_t RS485_SN[6];
 
-	for(uint8_t i = 0; i < 6; i++){
-		RS485_SN[i] = rx_buf[i+3];
+	for(uint8_t i = 0; i < 3; i++){
+		RS485_SN[i] = rx_buf[i+4];
 	}
 
 	TBSN = atoi(RS485_SN);
