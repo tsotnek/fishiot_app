@@ -2,6 +2,7 @@
 #define _MQTTCONNECTION_H_
 
 #include <zephyr/net/mqtt.h>
+#include <zephyr/net/socket.h>
 
 
 #define LED_CONTROL_OVER_MQTT          DK_LED1 /*The LED to control over MQTT*/

@@ -47,6 +47,7 @@ uint8_t rs485_updatetime(uint64_t unix_time_ms){
 
 	char rsupdatemessage[17];
 	sprintf(rsupdatemessage, "(+)%d%d\r\n", (int)unix_time_ms/10, luhnsCheckDigit);
+	uart_irq_rx_enable(uart_dev);
 	print_uart(rsupdatemessage);
 	return 0;
 }
@@ -55,16 +56,21 @@ uint8_t rs485_extractserialnnumber(void){
 	if(rx_buf[0]=='\0')
 		return 1;
 
-	uint8_t RS485_SN[6];
-
-	for(uint8_t i = 0; i < 3; i++){
+	uint8_t RS485_SN[10];
+    
+    uint8_t i=0;
+	while(rx_buf[i]!='>'){
 		RS485_SN[i] = rx_buf[i+4];
+		i++;
 	}
 
 	TBSN = atoi(RS485_SN);
+
 	memset((void *) rx_buf, 0, sizeof(rx_buf)/sizeof(char));
 	return 0;
 }
+
+
 /*
  * Read characters from UART until line end is detected. Afterwards push the
  * data to the message queue.
@@ -123,8 +129,6 @@ void print_uart(char *buf)
 
 uint8_t rs485_init(void)
 {
-	char tx_buf[MSG_SIZE];
-
 	if (!gpio_is_ready_dt(&RXpin)) {
 		return -1;
 	}
@@ -172,8 +176,8 @@ uint8_t rs485_init(void)
 		printk("Error in extraction of serial number");
 		return 1;
 	}
-
-	printk("Serial number is %d\n", TBSN);
+	uart_irq_rx_disable(uart_dev);
+	printk("TBR Serial number is %d\n", TBSN);
 	return 0;
 }
 

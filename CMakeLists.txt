@@ -5,11 +5,14 @@ project(cellular_fundamentals)
 
 # NORDIC SDK APP START
 target_include_directories(app PRIVATE include/)
+target_include_directories(app PRIVATE tasks/)
 target_sources(app PRIVATE src/mqtt_connection.c)
 target_sources(app PRIVATE src/gnss_connection.c)
 target_sources(app PRIVATE src/rtc.c)
 target_sources(app PRIVATE src/rs485.c)
 target_sources(app PRIVATE src/leds.c)
+target_sources(app PRIVATE src/adc.c)
+target_sources(app PRIVATE tasks/mqtt_task.c)
 target_sources(app PRIVATE src/main.c)
 
 
