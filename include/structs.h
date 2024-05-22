@@ -1,11 +1,6 @@
-#ifndef _MQTT_TASK_H_
-#define _MQTT_TASK_H_
+#ifndef _SEMAPHORES_STRUCTS_H_
+#define _SEMAPHORES_STRUCTS_H_
 #include <stdint.h>
-
-extern struct k_sem mqtt_pub_thread_start; 
-extern struct k_sem mqtt_pub_sem; 
-extern struct k_sem mqtt_pub_done_sem; 
-
 
 typedef enum{
 	TBR_status_or_tag,
@@ -53,6 +48,5 @@ typedef struct{
 	uint8_t fix_num_of_satelites; //fix[0:3], number of tracked sattelites [4:7]
 }IoF_bouy_status;
 
-void mqtt_thread(void);
 
 #endif

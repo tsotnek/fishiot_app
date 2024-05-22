@@ -1,2 +1,3 @@
 build*/
-Adding custom board support in nRF Connect SDK (1).pdf
+src/hello_world.code-workspace
+include/certificate.h

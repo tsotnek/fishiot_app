@@ -18,7 +18,7 @@ int64_t gnss_start_time;
 //PVT data frame variables,
 struct nrf_modem_gnss_pvt_data_frame pvt_data;
 /*Helper variables to find the TTFF */
-bool first_fix = false;
+uint8_t first_fix = false;
 
 
 

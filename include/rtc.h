@@ -159,7 +159,7 @@ typedef struct {
   uint8_t  hour;
   uint8_t  min;
   uint8_t  sec;
-  uint8_t  sec100;
+  uint16_t  sec100;
 
 } rtc_time_bcd_t;
 
@@ -173,7 +173,7 @@ typedef struct {
   uint8_t  hour;
   uint8_t  minute;
   uint8_t  seconds;
-  uint8_t  sec100;
+  uint16_t  sec100;
 
 } rtc_time_dec_t;
 
@@ -214,8 +214,8 @@ void rtc_evi_init();
 
 // rtc_time_dec_t rtc_convert_time_struct_bcd_to_decimal(rtc_time_bcd_t time_bcd);
 // rtc_time_bcd_t rtc_convert_time_struct_decimal_to_bcd(rtc_time_dec_t time_dec);
-uint8_t rtc_convert_bcd_to_decimal(uint8_t time_bcd);
-uint8_t rtc_convert_decimal_to_bcd(uint8_t time_dec);
+uint16_t rtc_convert_bcd_to_decimal(uint16_t time_bcd);
+uint16_t rtc_convert_decimal_to_bcd(uint16_t time_dec);
 
 uint8_t rtc_convert_nav_data_into_bcd_format(rtc_time_dec_t datetime);
 

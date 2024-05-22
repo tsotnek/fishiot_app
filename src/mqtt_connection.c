@@ -1,16 +1,25 @@
 #include <stdio.h>
 #include <string.h>
+#include <ncs_version.h>
 
 #include <zephyr/kernel.h>
+#if NCS_VERSION_NUMBER < 0x20600
 #include <zephyr/random/rand32.h>
+#else 
+#include <zephyr/random/random.h>
+#endif
 #include <zephyr/net/socket.h>
 #include <zephyr/net/mqtt.h>
 #include <nrf_modem_at.h>
 #include <zephyr/logging/log.h>
-// #include <dk_buttons_and_leds.h>
+
+#include <modem/modem_key_mgmt.h>
+#include "certificate.h"
 #include "mqtt_connection.h"
 
-
+static struct mqtt_utf8 pass,name;
+static uint8_t username[] = "SLIM";
+static uint8_t password[] = "SLIM";
 /* Buffers for MQTT client. */
 static uint8_t rx_buffer[CONFIG_MQTT_MESSAGE_BUFFER_SIZE];
 static uint8_t tx_buffer[CONFIG_MQTT_MESSAGE_BUFFER_SIZE];
@@ -212,16 +221,43 @@ int client_init(struct mqtt_client *client)
 	client->evt_cb = mqtt_evt_handler;
 	client->client_id.utf8 = client_id_get();
 	client->client_id.size = strlen(client->client_id.utf8);
-	client->password = NULL;
-	client->user_name = NULL;
+	pass.size = (uint32_t) strlen(password);
+	pass.utf8 = password;
+	name.size = (uint32_t) strlen(username);
+	name.utf8 = username;
+
+	client->password = &pass;
+	client->user_name = &name;
 	client->protocol_version = MQTT_VERSION_3_1_1;
 	/* MQTT buffers configuration */
 	client->rx_buf = rx_buffer;
 	client->rx_buf_size = sizeof(rx_buffer);
 	client->tx_buf = tx_buffer;
 	client->tx_buf_size = sizeof(tx_buffer);
-	/* We are not using TLS in Exercise 1 */
-	client->transport.type = MQTT_TRANSPORT_NON_SECURE;
+	
+	//NON_SECURE OR TLS
+	// #if(CONFIG_MQTT_LIB_TLS)
+	struct mqtt_sec_config *tls_cfg = &(client->transport).tls.config;
+	static sec_tag_t sec_tag_list[] = { CONFIG_MQTT_TLS_SEC_TAG };
+
+	LOG_INF("TLS enabled");
+	client->transport.type = MQTT_TRANSPORT_SECURE;
+
+	tls_cfg->peer_verify = CONFIG_MQTT_TLS_PEER_VERIFY;
+	tls_cfg->cipher_list = NULL;
+	tls_cfg->cipher_count = 0;
+	tls_cfg->sec_tag_count = ARRAY_SIZE(sec_tag_list);
+	tls_cfg->sec_tag_list = sec_tag_list;
+	tls_cfg->hostname = CONFIG_MQTT_BROKER_HOSTNAME;
+
+	tls_cfg->session_cache = IS_ENABLED(CONFIG_MQTT_TLS_SESSION_CACHING) ?
+					    TLS_SESSION_CACHE_ENABLED :
+					    TLS_SESSION_CACHE_DISABLED;
+	// #else
+	// client->transport.type = MQTT_TRANSPORT_NON_SECURE;
+	// #endif
+	//get a pointer to the TLS configration 
+	
 	return err;
 }
 
@@ -232,10 +268,47 @@ int fds_init(struct mqtt_client *c, struct pollfd *fds)
 	if (c->transport.type == MQTT_TRANSPORT_NON_SECURE) {
 		fds->fd = c->transport.tcp.sock;
 	} else {
-		return -ENOTSUP;
+		fds->fd = c->transport.tls.sock;
 	}
 
 	fds->events = POLLIN;
 
 	return 0;
+}
+
+
+int certificate_provision(void)
+{
+	int err = 0;
+	bool exists;
+
+	err = modem_key_mgmt_exists(CONFIG_MQTT_TLS_SEC_TAG,
+				    MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN,
+				    &exists);
+	if (err) {
+		LOG_ERR("Failed to check for certificates err %d\n", err);
+		return err;
+	}
+
+	if (exists) {
+		/* Let's compare the existing credential */
+		err = modem_key_mgmt_cmp(CONFIG_MQTT_TLS_SEC_TAG,
+					 MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN,
+					 CA_CERTIFICATE, 
+					 strlen(CA_CERTIFICATE));
+		LOG_INF("%s\n", err ? "mismatch" : "match");
+		if (!err) {
+			return 0;
+		}
+	}
+	LOG_INF("Provisioning certificates");
+	err = modem_key_mgmt_write(CONFIG_MQTT_TLS_SEC_TAG,
+				   MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN,
+				   CA_CERTIFICATE,
+				   strlen(CA_CERTIFICATE));
+	if (err) {
+		LOG_ERR("Failed to provision CA certificate: %d", err);
+		return err;
+	}
+	return err;
 }

@@ -76,7 +76,7 @@ uint8_t rtc_write_fix_data_first(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
   datetime.day      = pvt_data->datetime.day;
   datetime.hour     = pvt_data->datetime.hour;
   datetime.minute   = pvt_data->datetime.minute;
-  datetime.seconds  = pvt_data->datetime.seconds + 1;  //add 1 second
+  datetime.seconds  = pvt_data->datetime.seconds;
 	datetime.sec100   = pvt_data->datetime.ms;
 
   //convert into bcd
@@ -86,6 +86,7 @@ uint8_t rtc_write_fix_data_first(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
     return EXIT_FAILURE;
   }
   //write bcd format date/time to RTC
+  k_busy_wait(1000*(1000-pvt_data->datetime.ms));
   ret = rtc_i2c_write_datetime(time_bcd);
   if(ret != 0){
     printk("Error while writing NAV date/time into RTC\n");
@@ -109,12 +110,12 @@ uint8_t rtc_sync_nav_second(void){
 
 uint8_t rtc_i2c_write_datetime(rtc_time_bcd_t datetime){
 
-  uint8_t timearr[] = { datetime.sec, datetime.min, datetime.hour, \
+  uint8_t timearr[] = { datetime.sec100, datetime.sec, datetime.min, datetime.hour, \
                         datetime.weekday, datetime.day, datetime.month, datetime.year};
 
 
 
-  int ret = i2c_burst_write_dt(&dev_i2c, RTC_Sec, timearr, sizeof(timearr));
+  int ret = i2c_burst_write_dt(&dev_i2c, RTC_100_Sec, timearr, sizeof(timearr));
   if(ret != 0){
     printk("Failed to write to I2C device address %x at reg. %x \n\r", dev_i2c.addr,timearr[0]);
     return EXIT_FAILURE;
@@ -144,7 +145,7 @@ uint8_t rtc_i2c_read_multiple(uint8_t address, uint8_t num_bytes){
   
   memset((void *)i2c_ReceiveBuffer, 0, sizeof(i2c_ReceiveBuffer));
 
-  int ret = i2c_burst_read_dt(&dev_i2c, RTC_Sec, i2c_ReceiveBuffer, num_bytes);
+  int ret = i2c_burst_read_dt(&dev_i2c, address, i2c_ReceiveBuffer, num_bytes);
 
   if(ret != 0){
     printk("Failed to read from I2C device address %x at reg. %x \n\r", dev_i2c.addr,address);
@@ -187,7 +188,7 @@ uint8_t rtc_convert_nav_data_into_bcd_format(rtc_time_dec_t datetime){
 
   uint8_t montharr[] = {JANUARY, FEBRUARY, MARCH, APRIL, MAY, JUNE, \
                       JULY, AUGUST, SEPTEMBER, OCTOBER, NOVEMBER, DECEMBER};
-  uint8_t yy = datetime.year;
+  uint16_t yy = datetime.year;
   time_bcd.year    = rtc_convert_decimal_to_bcd(yy);
   time_bcd.month   = rtc_convert_decimal_to_bcd(datetime.month);
   time_bcd.day     = rtc_convert_decimal_to_bcd(datetime.day);
@@ -196,7 +197,8 @@ uint8_t rtc_convert_nav_data_into_bcd_format(rtc_time_dec_t datetime){
   time_bcd.weekday = (((yy + (yy/4)) % 7) +  montharr[datetime.month-1] + 6 + datetime.day) % 7;
   time_bcd.hour    = rtc_convert_decimal_to_bcd(datetime.hour);
   time_bcd.min     = rtc_convert_decimal_to_bcd(datetime.minute);
-  time_bcd.sec     = rtc_convert_decimal_to_bcd(datetime.seconds);
+  time_bcd.sec     = rtc_convert_decimal_to_bcd(datetime.seconds+1);
+  time_bcd.sec100  = rtc_convert_decimal_to_bcd(datetime.sec100);
   return EXIT_SUCCESS;
 }
 
@@ -204,20 +206,20 @@ uint8_t rtc_convert_nav_data_into_bcd_format(rtc_time_dec_t datetime){
 
 uint8_t rtc_read_time_data(void){
   // Request time stamp data
-  int ret = rtc_i2c_read_multiple(RTC_Sec, 7);
+  int ret = rtc_i2c_read_multiple(RTC_100_Sec, 8);
   if (ret != 0){
     printk("Error in reading time data!\n");
     return EXIT_FAILURE;
   }
   // Read data from I2C buffer
-  // rtc_time->sec100   = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[0]);
-  rtc_time.seconds  = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[0]);
-  rtc_time.minute   = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[1]);
-  rtc_time.hour     = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[2]);
-  rtc_time.weekday  = i2c_ReceiveBuffer[3];
-  rtc_time.day      = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[4]);
-  rtc_time.month    = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[5]);
-  rtc_time.year     = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[6]);
+  rtc_time.sec100   = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[0]);
+  rtc_time.seconds  = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[1]);
+  rtc_time.minute   = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[2]);
+  rtc_time.hour     = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[3]);
+  rtc_time.weekday  = i2c_ReceiveBuffer[4];
+  rtc_time.day      = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[5]);
+  rtc_time.month    = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[6]);
+  rtc_time.year     = rtc_convert_bcd_to_decimal(i2c_ReceiveBuffer[7]);
   // Some sort of check here
   return EXIT_SUCCESS;
 }
@@ -351,14 +353,14 @@ void rtc_evi_init(){
 //   return time_bcd;
 // }
 
-uint8_t rtc_convert_bcd_to_decimal(uint8_t time_bcd){
-  uint8_t time_dec = time_bcd & 15;    // last 4 bits are first digit
+uint16_t rtc_convert_bcd_to_decimal(uint16_t time_bcd){
+  uint16_t time_dec = time_bcd & 15;    // last 4 bits are first digit
   time_dec += (time_bcd >> 4) * 10;    // next 4 bits are second digit
   return time_dec;
 }
 
-uint8_t rtc_convert_decimal_to_bcd(uint8_t time_dec){
-  uint8_t time_bcd = time_dec % 10;    // last 4 bits are standard encoded (values 0, 1, 4, 8)
+uint16_t rtc_convert_decimal_to_bcd(uint16_t time_dec){
+  uint16_t time_bcd = time_dec % 10;    // last 4 bits are standard encoded (values 0, 1, 4, 8)
   time_bcd += (time_dec / 10) << 4;
   return time_bcd;
 }

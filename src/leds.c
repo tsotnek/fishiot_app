@@ -9,6 +9,68 @@ static const struct gpio_dt_spec led1 = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
 static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 static const struct gpio_dt_spec led3 = GPIO_DT_SPEC_GET(LED3_NODE, gpios);
 
+void LED_ERROR_CODE(uint8_t LED_ERROR)
+{
+	uint8_t led0_val = 0, led1_val = 0 , led2_val = 0,led3_val = 0;
+	switch(LED_ERROR){
+		//dec value: 1
+		case RTC_INIT_ERROR:
+			led0_val = 1;
+			break;
+		//dev calue: 2
+		case ADC_INIT_ERROR:
+			led1_val = 1;
+			break;
+		//dev calue: 3
+		case LTE_NETWORK_CONNECT_ERROR:
+			led0_val = 1;
+			led1_val = 1;
+			break;
+		//dev calue: 4
+		case RS485_INIT_ERROR:
+			led2_val = 1;
+			break;
+		//dev calue: 5
+		case AGPS_RECEIVE_ERROR:
+			led0_val = 1;
+			led2_val = 1;
+			break;
+		//dev calue: 6
+		case GNSS_INIT_ERROR:
+			led1_val = 1;
+			led2_val = 1;
+			break;
+		//dev calue: 7
+		case MQTT_CONNECT_ERROR:
+			led0_val = 1;
+			led1_val = 1;
+			led2_val = 1;
+			break;
+		//dev calue: 8
+		case MQTT_LIVE_ERROR:
+			led3_val = 1;
+			break;
+		//dev calue: 9
+		case MQTT_INPUT_ERROR:
+			led0_val = 1;
+			led3_val = 1;
+			break;
+		//dev calue: 10
+		case MQTT_PUBLISH_ERROR:
+			led1_val = 1;
+			led3_val = 1;
+			break;
+		default:
+			break;
+	}
+	gpio_pin_set_dt(&led0,led0_val);
+	gpio_pin_set_dt(&led1,led1_val);
+	gpio_pin_set_dt(&led2,led2_val);
+	gpio_pin_set_dt(&led3,led3_val);
+
+}
+
+
 uint8_t led_button_init(void){
 
 	uint8_t ret;

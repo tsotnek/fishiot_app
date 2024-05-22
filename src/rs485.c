@@ -1,5 +1,6 @@
 #include "rs485.h"
 #include "leds.h"
+#include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
 #include <stdlib.h>
@@ -24,7 +25,7 @@ static const struct gpio_dt_spec TXPin = GPIO_DT_SPEC_GET(TXHIGHpin, gpios);
 char rx_buf[MSG_SIZE];
 static int rx_buf_pos;
 
-uint16_t TBSN;
+extern uint16_t TBSN; //tbr serial number
 
 uint8_t rs485_updatetime(uint64_t unix_time_ms){
 	unix_time_ms /= 1000; //unix time stamp
