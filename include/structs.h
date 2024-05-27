@@ -2,6 +2,8 @@
 #define _SEMAPHORES_STRUCTS_H_
 #include <stdint.h>
 
+
+#define BAT_VOLTAGE_NOMINAL_MV 3600
 typedef enum{
 	TBR_status_or_tag,
 	buoy_status,
@@ -9,7 +11,8 @@ typedef enum{
 } IoF_header_flags;
 
 typedef struct{
-	uint16_t TBRserial_and_headerflag; //TBR serial[0:13] and header flag[14:15]
+	uint16_t TBRserial; //TBR serial[0:13] and header flag[14:15]
+	uint8_t headerflag;
 	uint32_t reftimestamp; //Reference timestamp (UTC)
 	uint8_t Tbr_message_type;
 } IoF_header;
@@ -32,20 +35,21 @@ typedef struct{
 	uint8_t tag_payload; //Tag ID (protocol: R04K, R64K, R01M, S64K, HS256, DS256)
  							//or Tag payload (protocol: S256)
  							//or Not used (protocol: R256)
-	uint16_t SNR_milliseconds; //SNR[0:3], rest is milliseconds
+	uint8_t SNR;
+	uint16_t milliseconds;
 
     uint8_t protocol;
 	
 } IoF_TBR_tag;
 
 typedef struct{
-	uint16_t batvolatge_airtemp_lon; //voltage [0:6], airtemp [7:13], lon[14:15]
-	uint16_t longitude;
-	uint8_t longitude_cont;
-	uint8_t PDOP_lat; //pdop [8:14], lat[15]
-	uint16_t latitude;
-	uint8_t latitude_cont;
-	uint8_t fix_num_of_satelites; //fix[0:3], number of tracked sattelites [4:7]
+	uint8_t batvoltage;
+	uint8_t airtemp;
+	uint32_t longitude;
+	uint8_t PDOP; //pdop [8:14], lat[15]
+	uint32_t latitude;
+	uint8_t fix;
+	uint8_t num_of_sattelites;
 }IoF_bouy_status;
 
 

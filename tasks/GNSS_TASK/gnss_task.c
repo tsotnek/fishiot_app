@@ -6,6 +6,7 @@
 #include "structs.h"
 #include "rtc.h"
 #include "adc.h"
+#include <stdlib.h>
 
 
 
@@ -13,7 +14,7 @@ LOG_MODULE_DECLARE(FishIoT);
 
 extern struct k_sem mqtt_lock_mutex; 
 extern struct k_sem gnss_thread_sem; 
-extern struct k_sem rtc_write_fix_sem; 
+// extern struct k_sem rtc_write_fix_sem; 
 extern struct k_sem rtc_esyn_sem; 
 extern struct k_sem gnss_start_sem; 
 extern struct k_sem mqtt_pub_sem; 
@@ -24,6 +25,8 @@ extern struct k_msgq IoFBuoy_Status_MSG;
 extern uint16_t TBSN; //tbr serial number
 
 static int num_satellites = 0;
+static int old_num_sattelites = 0;
+extern k_tid_t rtc_thread_tid;
 
 
 void gnss_event_handler(int event)
@@ -34,7 +37,7 @@ void gnss_event_handler(int event)
 	case NRF_MODEM_GNSS_EVT_PVT:
 		LOG_INF("Searching...");
 		/*Print satellite information */
-		num_satellites=0;
+		
 		for (int i = 0; i < 12 ; i++) {
 			if (pvt_data.sv[i].signal != 0) {
 				LOG_INF("sv: %d, cn0: %d", pvt_data.sv[i].sv, pvt_data.sv[i].cn0);
@@ -49,12 +52,13 @@ void gnss_event_handler(int event)
 		}
 		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
 			print_fix_data(&pvt_data);
-
+			old_num_sattelites = num_satellites;
 			/* Print the time to first fix */
 			if (!first_fix) {
 				LOG_INF("Time to first fix: %2.1lld s", (k_uptime_get() - gnss_start_time)/1000);
 				first_fix = true;
-				k_sem_give(&rtc_write_fix_sem);
+				k_thread_start(rtc_thread_tid);
+				// k_sem_give(&rtc_write_fix_sem);
 			}
 			else{
 				k_sem_give(&rtc_esyn_sem);
@@ -64,6 +68,7 @@ void gnss_event_handler(int event)
 
 			return;
 		}
+		num_satellites=0;
 		break;
 	/* Log when the GNSS sleeps and wakes up */
 	case NRF_MODEM_GNSS_EVT_PERIODIC_WAKEUP:
@@ -92,13 +97,13 @@ uint8_t gnss_task_agps_process_start(void){
 
 	err = agps_receive_process_data();
 	if(err){
-		LOG_ERR("Failed to receive and process AGPS data");
+		LOG_ERR("GNSS_THREAD: Failed to receive and process AGPS data");
 		LED_ERROR_CODE(AGPS_RECEIVE_ERROR);
 	}
 
 	k_sem_take(&gnss_start_sem, K_FOREVER);
 	if (gnss_init_and_start() != 0) {
-		LOG_ERR("Failed to initialize and start GNSS");
+		LOG_ERR("GNSS_THREAD: Failed to initialize and start GNSS");
 		LED_ERROR_CODE(GNSS_INIT_ERROR);
 		return 1;
 	}	
@@ -113,41 +118,40 @@ static void convert_to_nmea(IoF_bouy_status* bouy){
 	float latitude = (float)pvt_data.latitude;  //scale down to float
 	float longitude = (float)pvt_data.longitude; 
 
-	uint32_t lat_int = (uint32_t)latitude; //take int parts
-	uint32_t long_int = (uint32_t)longitude;
+	// uint32_t lat_int = (uint32_t)latitude; //take int parts
+	// uint32_t long_int = (uint32_t)longitude;
 
-	uint32_t lat_int_min =  (uint32_t)((latitude - (float)lat_int)*60); //44.6025
-	uint32_t lat_int_sec = (uint32_t)((((latitude - (float)lat_int)*60) - (float)lat_int_min)*60);
+	// uint32_t lat_int_min =  (uint32_t)((latitude - (float)lat_int)*60); //44.6025
+	// uint32_t lat_int_sec = (uint32_t)((((latitude - (float)lat_int)*60) - (float)lat_int_min)*60);
 
-	uint32_t long_int_min =  (uint32_t)((longitude - (float)long_int)*60);
-	uint32_t long_int_sec = (uint32_t)((((longitude - (float)long_int)*60) - (float)long_int_min)*60);
+	// uint32_t long_int_min =  (uint32_t)((longitude - (float)long_int)*60);
+	// uint32_t long_int_sec = (uint32_t)((((longitude - (float)long_int)*60) - (float)long_int_min)*60);
 
-	lat_int = (lat_int * 10000) + (lat_int_min * 100) + lat_int_sec;
-	long_int = (long_int * 10000) + (long_int_min * 100) + long_int_sec;
+	// lat_int = (lat_int * 10000) + (lat_int_min * 100) + lat_int_sec;
+	// long_int = (long_int * 10000) + (long_int_min * 100) + long_int_sec;
 
-	LOG_INF("NEMA Values are for LAT: %d      For LONG: %d\n", lat_int, long_int);
-	bouy->batvolatge_airtemp_lon |= ((long_int & 3)<< 13);
-	bouy->longitude = (uint16_t)(long_int >> 2);
-	bouy->longitude_cont = (uint8_t)(long_int >> 18);
-	bouy->PDOP_lat =(((uint16_t)pvt_data.pdop) & 0x7F) | (uint16_t)(lat_int & 1);
-	bouy->latitude = (uint16_t) (lat_int >> 1);
-	bouy->latitude_cont = (uint8_t)(lat_int >> 17);
-	bouy->fix_num_of_satelites = (uint8_t)2 | (uint8_t)(num_satellites<<3);
+	// LOG_INF("GNSS_THREAD: NEMA Values are for LAT: %d      For LONG: %d\n", lat_int, long_int);
+	// bouy->longitude = long_int * 1000;
+	// bouy->latitude = lat_int * 1000;
+
+	bouy->longitude = (uint32_t)(longitude * 10000000);
+	bouy->latitude = (uint32_t)(latitude * 10000000);
 }
 
 //THREAD
-void gnss_thread(void){
+void gnss_thread(void *, void *, void *){
 	for(;;){
 		//wait until the GNSS fix occurs
 		k_sem_take(&gnss_thread_sem, K_FOREVER);
 		int err = rtc_read_time_data();
 		if (err != 0){
-			LOG_ERR("Failed to read date from RTC\n");
+			LOG_ERR("GNSS_THREAD: Failed to read date from RTC\n");
 		}
-		LOG_INF("Time from RTC: %d:%d:%d.%d\n", rtc_time.hour, rtc_time.minute, rtc_time.seconds,rtc_time.sec100);
-
+		LOG_INF("GNSS_THREAD: Time from RTC: %d:%d:%d.%d\n", rtc_time.hour, rtc_time.minute, rtc_time.seconds,rtc_time.sec100);
+	
 		IoF_header header;
-		header.TBRserial_and_headerflag = TBSN | (buoy_status << 14);
+		header.TBRserial = TBSN;
+		header.headerflag = buoy_status;
 		struct tm ti={
 			.tm_isdst 	= -1,
 			.tm_sec 	= pvt_data.datetime.seconds,
@@ -161,10 +165,32 @@ void gnss_thread(void){
 		time_t t_of_day = mktime(&ti);
 		header.reftimestamp = (uint32_t)t_of_day;
 
-		LOG_INF("GNSS_THREAD: UTC TIMESTAMP IS: %d", header.reftimestamp);
+		struct tm rtctime_struct={
+			.tm_isdst 	= -1,
+			.tm_sec 	= rtc_time.seconds,
+			.tm_min 	= rtc_time.minute,
+			.tm_hour 	= rtc_time.hour,
+			.tm_mday 	= rtc_time.day,
+			.tm_mon 	= rtc_time.month - 1,
+			.tm_year 	= rtc_time.year + 2000 - 1900
+		};
+	
+		time_t rtc_time_utc = mktime(&rtctime_struct);
+
+		LOG_INF("GNSS_THREAD: UTC TIMESTAMP FOR GNSS IS: %d\n", header.reftimestamp);
+		LOG_INF("GNSS_THREAD: UTC TIMESTAMP FOR RTC IS: %d\n", (uint32_t)rtc_time_utc);
+
 		IoF_bouy_status bouy;
-		bouy.batvolatge_airtemp_lon = (uint16_t)((adc_read_voltage()/100) | ((rtc_read_temp()) << 7));
+		bouy.batvoltage = (uint8_t)((adc_read_voltage()*100)/BAT_VOLTAGE_NOMINAL_MV);
+		bouy.airtemp = rtc_read_temp();
 		convert_to_nmea(&bouy);
+		bouy.fix = 3; //3D fix to be compatible with IoF format
+		if(old_num_sattelites == 0)
+			bouy.num_of_sattelites = bouy.num_of_sattelites;
+		else
+			bouy.num_of_sattelites = old_num_sattelites;
+		LOG_INF("Value of PDOP is %f", pvt_data.pdop);
+		bouy.PDOP = (uint8_t)(pvt_data.pdop*10); //multiply by 10, because then node-red multiplies by 0.1
 		
 		
 		if(k_msgq_num_used_get(&IoFHEADER_MSG) >= 16){
@@ -188,7 +214,8 @@ void gnss_thread(void){
 		if(k_msgq_put(&IoFBuoy_Status_MSG, &bouy, K_FOREVER)!=0){
 			LOG_INF("GNSS_THREAD: Message couldn't be placed in IoFBuoy_Status_MSG queue\n");
 		}
-		k_sem_give(&mqtt_pub_sem);
+		// if(k_msgq_num_used_get(&IoFHEADER_MSG)>5)
+			k_sem_give(&mqtt_pub_sem);
 
 	}
 }

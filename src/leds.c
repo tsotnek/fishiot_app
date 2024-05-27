@@ -1,4 +1,9 @@
 #include "leds.h"
+#include <zephyr/logging/log.h>
+
+
+LOG_MODULE_DECLARE(FishIoT);
+
 
 
 static struct gpio_callback button_cb_data;
@@ -8,6 +13,15 @@ static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 static const struct gpio_dt_spec led1 = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
 static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 static const struct gpio_dt_spec led3 = GPIO_DT_SPEC_GET(LED3_NODE, gpios);
+
+
+
+void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+	// BIT(button1.pin)
+	LOG_INF("Button pressed\n");
+	// k_sem_give(&time_read_sem);
+}
 
 void LED_ERROR_CODE(uint8_t LED_ERROR)
 {
@@ -173,6 +187,26 @@ void LED_OFF(uint8_t LED){
             break;
         case BOARD_LED3:
             gpio_pin_set_dt(&led3,true);
+            break;  
+        default:
+            break;
+    }
+}
+
+
+void LED_TOGGLE(uint8_t LED){
+    switch(LED){
+        case BOARD_LED0:
+	        gpio_pin_toggle_dt(&led0);
+            break;
+        case BOARD_LED1:
+	        gpio_pin_toggle_dt(&led1);
+            break;
+        case BOARD_LED2:
+	        gpio_pin_toggle_dt(&led2);
+            break;
+        case BOARD_LED3:
+            gpio_pin_toggle_dt(&led3);
             break;  
         default:
             break;

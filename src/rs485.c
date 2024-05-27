@@ -8,7 +8,7 @@
 
 
 K_SEM_DEFINE(uart_rec_sem, 0, 1);
-
+K_SEM_DEFINE(tbr_sync_task_sem, 0 , 1);
 /* queue to store up to 10 messages (aligned to 4-byte boundary) */
 K_MSGQ_DEFINE(uart_msgq, MSG_SIZE, 10, 4);
 
@@ -26,9 +26,17 @@ char rx_buf[MSG_SIZE];
 static int rx_buf_pos;
 
 extern uint16_t TBSN; //tbr serial number
+static bool enablerecieve; 
+extern bool RTC_TIME_SET;
 
+uint8_t rs485_rounduptime(void){
+	char *msg_to_send="(+)\r\n";
+	print_uart(msg_to_send);
+	return 0;
+}
 uint8_t rs485_updatetime(uint64_t unix_time_ms){
-	unix_time_ms /= 1000; //unix time stamp
+	if(!RTC_TIME_SET)
+		unix_time_ms /= 1000; //unix time stamp
 	uint64_t time = unix_time_ms;
 	uint16_t digitSum = 0;
 	uint32_t digit = 0;
@@ -46,16 +54,21 @@ uint8_t rs485_updatetime(uint64_t unix_time_ms){
 
 	uint8_t luhnsCheckDigit = (digitSum * 9) % 10;
 
+	char* ack_msg = "ack02";
 	char rsupdatemessage[17];
 	sprintf(rsupdatemessage, "(+)%d%d\r\n", (int)unix_time_ms/10, luhnsCheckDigit);
-	uart_irq_rx_enable(uart_dev);
+	if(!RTC_TIME_SET)
+		uart_irq_rx_enable(uart_dev);
 	print_uart(rsupdatemessage);
-	return 0;
+	k_busy_wait(100*1000);
+	return strcmp(rx_buf, ack_msg);
 }
 
 uint8_t rs485_extractserialnnumber(void){
-	if(rx_buf[0]=='\0')
+	if(rx_buf[0]!='S'){
+		memset((void *) rx_buf, 0, sizeof(rx_buf)/sizeof(char));
 		return 1;
+	}
 
 	uint8_t RS485_SN[10];
     
@@ -87,6 +100,7 @@ void serial_cb(const struct device *dev, void *user_data)
 	if (!uart_irq_rx_ready(uart_dev)) {
 		return;
 	}
+	// unsigned int irqkey = irq_lock();
 
 	/* read until FIFO empty */
 	while (uart_fifo_read(uart_dev, &c, 1) == 1) {
@@ -95,13 +109,16 @@ void serial_cb(const struct device *dev, void *user_data)
 			rx_buf[rx_buf_pos] = '\0';
 
 			/* if queue is full, message is silently dropped */
-			k_msgq_put(&uart_msgq, &rx_buf, K_NO_WAIT);
-
+			//place it in queue only if its LOG or Tag detection
+			if(strlen(rx_buf)>16 && enablerecieve){
+				k_msgq_put(&uart_msgq, &rx_buf, K_NO_WAIT);
+				k_sem_give(&tbr_sync_task_sem);
+				k_sem_give(&uart_rec_sem);
+			}
 			/* reset the buffer (it was copied to the msgq) */
 			rx_buf_pos = 0;
-			//read has finished
-			if(strlen(rx_buf)>16)
-				k_sem_give(&uart_rec_sem);
+			//check if the size of messages is greater than 5
+				
 		} else if (rx_buf_pos < (sizeof(rx_buf) - 1)) {
 			if ((c != '\n') || (c != '\r')){
 				rx_buf[rx_buf_pos++] = c;
@@ -109,6 +126,7 @@ void serial_cb(const struct device *dev, void *user_data)
 		}
 		/* else: characters beyond buffer size are dropped */
 	}
+	// irq_unlock(irqkey);
 
 	
 }
@@ -130,6 +148,7 @@ void print_uart(char *buf)
 
 uint8_t rs485_init(void)
 {
+	enablerecieve = false;
 	if (!gpio_is_ready_dt(&RXpin)) {
 		return -1;
 	}
@@ -168,17 +187,27 @@ uint8_t rs485_init(void)
 		}
 		return 0;
 	}
+	int retryattempts = 0;
+retry:
+	if(retryattempts>10){
+		printk("Something wrong with TBRLive...\n");
+		return 1;
+	}
 	uart_irq_rx_enable(uart_dev);
 	print_uart("?\r\n");
 
-	k_sleep(K_MSEC(1000));
+	k_busy_wait(100*1000);
+
+	uart_irq_rx_disable(uart_dev);
 
 	if(rs485_extractserialnnumber()!=0){
-		printk("Error in extraction of serial number");
-		return 1;
+		printk("Error in extraction of serial number, retrying...\n");
+		k_busy_wait(1*1000*1000);
+		retryattempts++;
+		goto retry;
 	}
-	uart_irq_rx_disable(uart_dev);
 	printk("TBR Serial number is %d\n", TBSN);
+	enablerecieve = true;
 	return 0;
 }
 

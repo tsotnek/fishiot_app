@@ -1,6 +1,5 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include "mqtt_connection.h"
 #include "rs485.h"
 #include "mqtt_task.h"
 #include "leds.h"
@@ -18,9 +17,6 @@ extern struct k_sem mqtt_pub_sem;
 extern struct k_sem mqtt_pub_done_sem; 
 extern struct k_sem mqtt_lock_mutex; 
 
-void mqtt_thread(void);
-
-
 //MQTT
 /* The mqtt client struct */
 static struct mqtt_client client;
@@ -31,22 +27,26 @@ static struct pollfd fds;
 uint8_t mqttmessageformat[15] = {0};
 uint8_t mqttmessagelen;
 //helper function
-static void formatmessage(void){
+static uint8_t formatmessage(void){
+	if(k_msgq_num_used_get(&IoFHEADER_MSG)==0){
+		return 0;
+	}
 	IoF_header iofheader;
 	if(k_msgq_get(&IoFHEADER_MSG, &iofheader, K_FOREVER)!=0){
 		LOG_ERR("MQTT_TASK: Couldn't get message from IoFHEADER_MSG queue\n");
+		return 0;
 	}
 
-	mqttmessageformat[0] = (uint8_t)iofheader.TBRserial_and_headerflag;
-	mqttmessageformat[1] = (uint8_t)(iofheader.TBRserial_and_headerflag>>8);
+	mqttmessageformat[0] = (uint8_t)(iofheader.TBRserial >> 6);
+	mqttmessageformat[1] = (uint8_t)(((iofheader.TBRserial & 0x3f) << 2) | iofheader.headerflag);
 
-	mqttmessageformat[2] = (uint8_t)iofheader.reftimestamp;
-	mqttmessageformat[3] = (uint8_t)(iofheader.reftimestamp>>8);
-	mqttmessageformat[4] = (uint8_t)(iofheader.reftimestamp>>16);
-	mqttmessageformat[5] = (uint8_t)(iofheader.reftimestamp>>24);
+	mqttmessageformat[2] = (uint8_t)(iofheader.reftimestamp>>24);
+	mqttmessageformat[3] = (uint8_t)(iofheader.reftimestamp>>16);
+	mqttmessageformat[4] = (uint8_t)(iofheader.reftimestamp>>8);
+	mqttmessageformat[5] = (uint8_t)(iofheader.reftimestamp);
 	mqttmessagelen = 6;
 
-	switch((iofheader.TBRserial_and_headerflag & 0xC000)>>14){
+	switch(iofheader.headerflag){
 		case TBR_status_or_tag:
 			//check which message was received
 			
@@ -58,8 +58,8 @@ static void formatmessage(void){
 				}
 				mqttmessageformat[6] = status.secsince_timestamp;
 				mqttmessageformat[7] = status.code_type;
-				mqttmessageformat[8] = (uint8_t)status.temperature;
-				mqttmessageformat[9] = (uint8_t)(status.temperature>>8);
+				mqttmessageformat[8] = (uint8_t)(status.temperature>>8);
+				mqttmessageformat[9] = (uint8_t)status.temperature;
 				mqttmessageformat[10] = status.noise_ave;
 				mqttmessageformat[11] = status.noise_peak;
 				mqttmessageformat[12] = status.snr_detection;
@@ -75,40 +75,45 @@ static void formatmessage(void){
 				}
 				mqttmessageformat[6] = tag.secsince_timestamp;
 				mqttmessageformat[7] = tag.code_type;
-				mqttmessageformat[8] = (uint8_t)tag.tag_id;
+				
 				switch(tag.protocol){ //depeending on code type adjust payload
 					case S256: //protocol s256
+						mqttmessageformat[8] = (uint8_t)tag.tag_id;
 						mqttmessageformat[9] = tag.tag_payload;
-						mqttmessageformat[10] = (uint8_t)tag.SNR_milliseconds;
-						mqttmessageformat[11] = (uint8_t)(tag.SNR_milliseconds>>8);
+						mqttmessageformat[10] = (uint8_t)(((tag.SNR & 0x3f)<<2) | ((tag.milliseconds >> 8)&0x03));
+						mqttmessageformat[11] = (uint8_t)(tag.milliseconds & 0xff);
 						mqttmessagelen = 12;						
 						break;
 					case S64K:
 					case HS256:
 					case DS256:
-						mqttmessageformat[9] = (uint8_t)(tag.tag_id >> 8);
+						mqttmessageformat[8] = (uint8_t)(tag.tag_id >> 8);
+						mqttmessageformat[9] = (uint8_t)tag.tag_id;
 						mqttmessageformat[10] = tag.tag_payload;
-						mqttmessageformat[11] = (uint8_t)tag.SNR_milliseconds;
-						mqttmessageformat[12] = (uint8_t)(tag.SNR_milliseconds>>8);
+						mqttmessageformat[11] = (uint8_t)(((tag.SNR & 0x3f)<<2) | ((tag.milliseconds >> 8)&0x03));
+						mqttmessageformat[12] = (uint8_t)(tag.milliseconds & 0xff);
 						mqttmessagelen = 13;
 						break;
 					case R01M:
+						mqttmessageformat[8] = (uint8_t)(tag.tag_id >> 16);
 						mqttmessageformat[9] = (uint8_t)(tag.tag_id >> 8);
-						mqttmessageformat[10] = (uint8_t)(tag.tag_id >> 16);
-						mqttmessageformat[11] = (uint8_t)tag.SNR_milliseconds;
-						mqttmessageformat[12] = (uint8_t)(tag.SNR_milliseconds>>8);
+						mqttmessageformat[10] = (uint8_t)tag.tag_id;
+						mqttmessageformat[11] = (uint8_t)(((tag.SNR & 0x3f)<<2) | ((tag.milliseconds >> 8)&0x03));
+						mqttmessageformat[12] = (uint8_t)(tag.milliseconds & 0xff);
 						mqttmessagelen = 13;
 						break;
 					case R04K:
 					case R64K:
-						mqttmessageformat[9] = (uint8_t)(tag.tag_id >> 8);
-						mqttmessageformat[10] = (uint8_t)tag.SNR_milliseconds;
-						mqttmessageformat[11] = (uint8_t)(tag.SNR_milliseconds>>8);
+						mqttmessageformat[8] = (uint8_t)(tag.tag_id >> 8);
+						mqttmessageformat[9] = (uint8_t)tag.tag_id;
+						mqttmessageformat[10] = (uint8_t)(((tag.SNR & 0x3f)<<2) | ((tag.milliseconds >> 8)&0x03));
+						mqttmessageformat[11] = (uint8_t)(tag.milliseconds & 0xff);
 						mqttmessagelen = 12;						
 						break;
 					case R256:
-						mqttmessageformat[9] = (uint8_t)tag.SNR_milliseconds;
-						mqttmessageformat[10] = (uint8_t)(tag.SNR_milliseconds>>8);
+						mqttmessageformat[8] = (uint8_t)tag.tag_id;
+						mqttmessageformat[9] = (uint8_t)(((tag.SNR & 0x3f)<<2) | ((tag.milliseconds >> 8)&0x03));
+						mqttmessageformat[10] = (uint8_t)(tag.milliseconds & 0xff);
 						mqttmessagelen = 11;						
 						break;
 					default:
@@ -126,16 +131,16 @@ static void formatmessage(void){
 			if(k_msgq_get(&IoFBuoy_Status_MSG, &bouy, K_FOREVER)!=0){
 				LOG_ERR("MQTT_TASK: Couldn't get message from IoFBuoy_Status_MSG queue\n");
 			}
-			mqttmessageformat[6] = (uint8_t)bouy.batvolatge_airtemp_lon;
-			mqttmessageformat[7] = (uint8_t)(bouy.batvolatge_airtemp_lon>>8);
-			mqttmessageformat[8] = (uint8_t)bouy.longitude;
-			mqttmessageformat[9] = (uint8_t)(bouy.longitude>>8);
-			mqttmessageformat[10] = bouy.longitude_cont;
-			mqttmessageformat[11] = bouy.PDOP_lat;
-			mqttmessageformat[12] = (uint8_t)bouy.latitude;
-			mqttmessageformat[13] = (uint8_t)(bouy.latitude>>8);
-			mqttmessageformat[14] = bouy.latitude_cont;
-			mqttmessageformat[15] = bouy.fix_num_of_satelites;
+			mqttmessageformat[6] = (uint8_t)(((bouy.batvoltage & 0x7F) << 1) | ((bouy.airtemp >> 6) & 0b01));
+			mqttmessageformat[7] = (uint8_t)(((bouy.airtemp & 0x3f) << 2) | ((bouy.longitude >> 25) & 0b11));
+			mqttmessageformat[8] = (uint8_t)((bouy.longitude >> 17) & 0xff);
+			mqttmessageformat[9] = (uint8_t)((bouy.longitude >> 9) & 0xff);
+			mqttmessageformat[10] = (uint8_t)((bouy.longitude >> 1) & 0xff);
+			mqttmessageformat[11] = (uint8_t)((bouy.PDOP & 0xfe) | ((bouy.latitude >> 29) & 0x01));
+			mqttmessageformat[12] = (uint8_t)((bouy.latitude >> 21) & 0xff);
+			mqttmessageformat[13] = (uint8_t)((bouy.latitude >> 13) & 0xff);
+			mqttmessageformat[14] = (uint8_t)((bouy.latitude >> 5) & 0xff);
+			mqttmessageformat[15] = (uint8_t)(((bouy.fix & 0x07) << 5) | (bouy.num_of_sattelites & 0x1f));
 			mqttmessagelen = 16;
 			LOG_INF("Transmitting Bouy Status\n");
 
@@ -145,47 +150,71 @@ static void formatmessage(void){
 		default: 
 			break;
 	}
+	return 1;
 }
 
-void mqtt_thread(void){
+void mqtt_thread(void *, void *, void *){
 	
-	k_sem_take(&mqtt_pub_thread_start, K_FOREVER);
+	// k_sem_take(&mqtt_pub_thread_start, K_FOREVER);
 	
 	int err;
+	// unsigned int irqkey;
 	err = client_init(&client);
 	if (err) {
 		LOG_ERR("Failed to initialize MQTT client: %d", err);
 	}
-	
+	int connect_attempt = 0;
 	for(;;){
 	k_sem_take(&mqtt_pub_sem, K_FOREVER);
 	k_sem_take(&mqtt_lock_mutex,K_FOREVER);
-	unsigned int irqkey = irq_lock();
-	formatmessage();
 do_connect:
-
+	if (connect_attempt > 0) {
+		LOG_INF("Reconnecting in %d seconds...",
+			CONFIG_MQTT_RECONNECT_DELAY_S);
+		// irq_unlock(irqkey);
+		k_sleep(K_SECONDS(CONFIG_MQTT_RECONNECT_DELAY_S));
+		connect_attempt = 0;
+	}
+	// irqkey = irq_lock();
+	
 	err = mqtt_connect(&client);
 	if (err) {
 		LOG_ERR("Error in mqtt_connect: %d", err);
 		LED_ERROR_CODE(MQTT_CONNECT_ERROR);
+		connect_attempt++;
 		goto do_connect;
 	}
 
 	err = fds_init(&client,&fds);
 	if (err) {
 		LOG_ERR("Error in fds_init: %d", err);
+		connect_attempt++;
+		goto do_connect;
 	}
 
 	err = poll(&fds, 1, mqtt_keepalive_time_left(&client));
 	if (err < 0) {
 		LOG_ERR("Error in poll(): %d", errno);
-	}
-		
-		
+		connect_attempt++;
+		err = mqtt_disconnect(&client);
+		if (err) {
+			LOG_ERR("Could not disconnect MQTT client: %d", err);
+		}
+		goto do_connect;
+
+	}	
+	
 	err = mqtt_live(&client);
 	if ((err != 0) && (err != -EAGAIN)) {
 		LED_ERROR_CODE(MQTT_LIVE_ERROR);
 		LOG_ERR("Error in mqtt_live: %d", err);
+		connect_attempt++;
+		err = mqtt_disconnect(&client);
+		if (err) {
+			LOG_ERR("Could not disconnect MQTT client: %d", err);
+		}
+		goto do_connect;
+
 	}
 
 	if ((fds.revents & POLLIN) == POLLIN) {
@@ -193,35 +222,54 @@ do_connect:
 		if (err != 0) {
 			LED_ERROR_CODE(MQTT_INPUT_ERROR);
 			LOG_ERR("Error in mqtt_input: %d", err);
+			connect_attempt++;
+			err = mqtt_disconnect(&client);
+			if (err) {
+				LOG_ERR("Could not disconnect MQTT client: %d", err);
+			}
+			goto do_connect;
 		}
 	}
 
 	if ((fds.revents & POLLERR) == POLLERR) {
+		connect_attempt++;
 		LOG_ERR("POLLERR");
+		if (err) {
+			LOG_ERR("Could not disconnect MQTT client: %d", err);
+		}
+		goto do_connect;
 	}
 
 	if ((fds.revents & POLLNVAL) == POLLNVAL) {
+		connect_attempt++;
 		LOG_ERR("POLLNVAL");
+		if (err) {
+			LOG_ERR("Could not disconnect MQTT client: %d", err);
+		}
+		goto do_connect;
 	}
-	// data_formatter(&pvt_data);
-	err = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE,
-		mqttmessageformat, mqttmessagelen);
-	if (err) {
-		LED_ERROR_CODE(MQTT_PUBLISH_ERROR);
-		LOG_INF("Failed to send message, %d", err);
+	while(formatmessage()){
+		
+		err = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE,mqttmessageformat, mqttmessagelen);
+		if (err) {
+			LED_ERROR_CODE(MQTT_PUBLISH_ERROR);
+			LOG_INF("Failed to send message, %d", err);
+			connect_attempt++;
+			break;
+		}
+		memset((void *) mqttmessageformat, 0, sizeof(mqttmessageformat)/sizeof(uint8_t));
+		memset((void *) &mqttmessagelen, 0, sizeof(uint8_t));
 	}
-	memset((void *) mqttmessageformat, 0, sizeof(mqttmessageformat)/sizeof(uint8_t));
-	memset((void *) &mqttmessagelen, 0, sizeof(uint8_t));
 
 	LOG_INF("Disconnecting MQTT client");
-
 	err = mqtt_disconnect(&client);
 	if (err) {
 		LOG_ERR("Could not disconnect MQTT client: %d", err);
 	}
+	
 	// k_sem_give(&mqtt_pub_done_sem);
 	k_sem_give(&mqtt_lock_mutex);
-	irq_unlock(irqkey);
+	// irq_unlock(irqkey);
 	}
 }
 

@@ -223,4 +223,7 @@ uint8_t rtc_write_fix_data_first(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 uint8_t rtc_sync_nav_second(void);
 
 
+
+
+
 #endif

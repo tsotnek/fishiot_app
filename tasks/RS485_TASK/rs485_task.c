@@ -5,8 +5,8 @@
 #include <zephyr/logging/log.h>
 #include <stdlib.h>
 
-
 LOG_MODULE_DECLARE(FishIoT);
+
 
 
 extern struct k_msgq IoFHEADER_MSG; 
@@ -72,35 +72,38 @@ static void code_type_function(IoF_TBR_tag* tag, char * protocol, int frequency)
 
 
 
-void rs485_thread(void){
+void rs485_thread(void *, void *, void *){
 	//wait until the message was received on RS485
-	char *word = "TBR Sensor";
+	const char *word = "TBR Sensor";
+	const char s[2]= ",";
+	char *token;
+	char arr[9][25]; 
+	uint8_t rx_buf_temp[60];
+	uint8_t rx_cpy[60];
 	for(;;){
 		k_sem_take(&uart_rec_sem, K_FOREVER);
 
-		uint8_t rx_buf_temp[60];
-		strcpy(rx_buf_temp,rx_buf);
-
+		if(k_msgq_get(&uart_msgq, rx_buf_temp, K_FOREVER)!=0){
+			LOG_ERR("RS485_THREAD: Couldn't get receieved UART Message!\n");
+		}
+		strcpy(rx_cpy, rx_buf_temp);
 		IoF_header header;
-		header.TBRserial_and_headerflag = TBSN | (TBR_status_or_tag << 14);
-
-
-		const char s[2]= ",";
-		char *token;
-		char arr[9][25]; 
+		header.TBRserial = TBSN;
+		header.headerflag = TBR_status_or_tag;
+		
 		/* get the first token */
-		token = strtok(rx_buf, s);
+		token = strtok(rx_buf_temp, s);
 		int i =0;
 		/* walk through other tokens */
 		while( token != NULL ) {
-			//   printf( " %s\n", token );
 			strcpy(arr[i],token);
 			i++;
 			token = strtok(NULL, s);
 		}
 		header.reftimestamp = atoi(arr[1]);
+
 		
-		if(strstr(rx_buf_temp,word)){
+		if(strstr(rx_cpy,word)){
 			//log message
 			header.Tbr_message_type = 255; //log message
 			//check the number of messages in queue
@@ -121,7 +124,7 @@ void rs485_thread(void){
 			status.noise_ave = atoi(arr[4]);
 			status.noise_peak = atoi(arr[5]);
 			status.snr_detection = atoi(arr[6]);
-			status.upper_timing_err = 0xcc;
+			status.upper_timing_err = 0xcc;//reserved for upper accuracy limit
 			//check the number of messages in queue
 			if(k_msgq_num_used_get(&IoFTBR_Status_MSG) >= 16){
 				//purge oldest value
@@ -133,7 +136,7 @@ void rs485_thread(void){
 			if(k_msgq_put(&IoFTBR_Status_MSG, &status, K_FOREVER)!=0){
 				LOG_INF("RS485_THREAD: Message couldn't be placed in IoFTBR_Status_MSG queue\n");
 			}
-			LOG_INF("Received LOG Message on TBR: %s", rx_buf_temp);
+			LOG_INF("Received LOG Message on TBR: %s", rx_cpy);
 		}
 		else{
 			//tag detection
@@ -155,7 +158,8 @@ void rs485_thread(void){
 			code_type_function(&tag, arr[3], atoi(arr[7])); //write code_type
 			tag.tag_id = atoi(arr[4]);
 			tag.tag_payload = atoi(arr[5]);
-			tag.SNR_milliseconds = (((uint16_t)(atoi(arr[2])&0xFFF))<<4) | (uint16_t)atoi(arr[6]);
+			tag.SNR = (uint8_t)atoi(arr[6]);
+			tag.milliseconds = (uint16_t)atoi(arr[2]);
 			
 			if(k_msgq_num_used_get(&IoFTBR_TAG_MSG) >= 16){
 				//purge oldest value
@@ -167,12 +171,8 @@ void rs485_thread(void){
 			if(k_msgq_put(&IoFTBR_TAG_MSG, &tag, K_FOREVER)!=0){
 				LOG_INF("RS485_THREAD: Message couldn't be placed in IoFTBR_TAG_MSG queue\n");
 			}
-			LOG_INF("Detected FISH on TBR: %s", rx_buf_temp);
+			LOG_INF("Detected FISH on TBR: %s", rx_cpy);
 		}
-
-		
 		k_sem_give(&mqtt_pub_sem);
-		// k_sem_take(&mqtt_pub_done_sem, K_FOREVER);
-		memset((void *) rx_buf, 0, sizeof(rx_buf)/sizeof(char));
 	}
 }

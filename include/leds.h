@@ -48,4 +48,5 @@ uint8_t led_button_init(void);
 void LED_ON(uint8_t LED);
 void LED_OFF(uint8_t LED);
 void LED_ERROR_CODE(uint8_t LED_ERROR);
+void LED_TOGGLE(uint8_t LED);
 #endif

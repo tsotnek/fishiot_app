@@ -25,6 +25,8 @@ uint8_t i2c_ReceiveBuffer[10];
 rtc_time_dec_t rtc_time;
 rtc_time_bcd_t time_bcd;
 
+
+//function that initializes RTC module
 uint8_t rtc_init(void){
 
   // Setup I2C protocol
@@ -77,7 +79,7 @@ uint8_t rtc_write_fix_data_first(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
   datetime.hour     = pvt_data->datetime.hour;
   datetime.minute   = pvt_data->datetime.minute;
   datetime.seconds  = pvt_data->datetime.seconds;
-	datetime.sec100   = pvt_data->datetime.ms;
+	// datetime.sec100   = pvt_data->datetime.ms;
 
   //convert into bcd
   ret = rtc_convert_nav_data_into_bcd_format(datetime);
@@ -110,12 +112,12 @@ uint8_t rtc_sync_nav_second(void){
 
 uint8_t rtc_i2c_write_datetime(rtc_time_bcd_t datetime){
 
-  uint8_t timearr[] = { datetime.sec100, datetime.sec, datetime.min, datetime.hour, \
+  uint8_t timearr[] = { datetime.sec, datetime.min, datetime.hour, \
                         datetime.weekday, datetime.day, datetime.month, datetime.year};
 
 
 
-  int ret = i2c_burst_write_dt(&dev_i2c, RTC_100_Sec, timearr, sizeof(timearr));
+  int ret = i2c_burst_write_dt(&dev_i2c, RTC_Sec, timearr, sizeof(timearr));
   if(ret != 0){
     printk("Failed to write to I2C device address %x at reg. %x \n\r", dev_i2c.addr,timearr[0]);
     return EXIT_FAILURE;
@@ -198,7 +200,7 @@ uint8_t rtc_convert_nav_data_into_bcd_format(rtc_time_dec_t datetime){
   time_bcd.hour    = rtc_convert_decimal_to_bcd(datetime.hour);
   time_bcd.min     = rtc_convert_decimal_to_bcd(datetime.minute);
   time_bcd.sec     = rtc_convert_decimal_to_bcd(datetime.seconds+1);
-  time_bcd.sec100  = rtc_convert_decimal_to_bcd(datetime.sec100);
+  // time_bcd.sec100  = rtc_convert_decimal_to_bcd(datetime.sec100);
   return EXIT_SUCCESS;
 }
 
