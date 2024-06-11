@@ -118,7 +118,37 @@ int agps_receive_process_data(void){
     return 0;
 }
 
+uint8_t gnss_periodic_start(void)
+{
 
+	nrf_modem_gnss_stop();
+
+	if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0) {
+		LOG_ERR("Failed to set GNSS event handler");
+		return 1;
+	}
+
+	if (nrf_modem_gnss_fix_interval_set(0) != 0) {
+		LOG_ERR("Failed to set GNSS fix interval");
+		// return 1;
+	}
+
+	if (nrf_modem_gnss_fix_retry_set(CONFIG_GNSS_PERIODIC_TIMEOUT) != 0) {
+		LOG_ERR("Failed to set GNSS fix retry");
+		// return 1;
+	}
+
+	// uint8_t use_case;
+
+	// use_case = NRF_MODEM_GNSS_USE_CASE_MULTIPLE_HOT_START | NRF_MODEM_GNSS_USE_CASE_LOW_ACCURACY;
+
+	// int err = nrf_modem_gnss_use_case_set(use_case);
+	if (nrf_modem_gnss_start() != 0) {
+		LOG_ERR("Failed to start GNSS");
+		return 1;
+	}
+	return 0;
+}
 int gnss_init_and_start(void)
 {
 
@@ -133,7 +163,7 @@ int gnss_init_and_start(void)
 		return 1;
 	}
 
-	if (nrf_modem_gnss_fix_interval_set(CONFIG_GNSS_PERIODIC_INTERVAL) != 0) {
+	if (nrf_modem_gnss_fix_interval_set(0) != 0) {
 		LOG_ERR("Failed to set GNSS fix interval");
 		return 1;
 	}
@@ -156,6 +186,12 @@ int gnss_init_and_start(void)
 	}
 #endif
 
+
+	uint8_t use_case;
+
+	use_case = NRF_MODEM_GNSS_USE_CASE_MULTIPLE_HOT_START;
+
+	err = nrf_modem_gnss_use_case_set(use_case);
 	LOG_INF("Starting GNSS");
 	if (nrf_modem_gnss_start() != 0) {
 		LOG_ERR("Failed to start GNSS");

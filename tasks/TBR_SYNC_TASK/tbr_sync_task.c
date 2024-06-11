@@ -10,7 +10,7 @@ LOG_MODULE_DECLARE(FishIoT);
 
 extern bool RTC_TIME_SET;
 
-static uint64_t tbr_sync_rtc_read_time(void){
+static uint32_t tbr_sync_rtc_read_time(void){
     rtc_read_time_data();
     struct tm rtctime_struct={
         .tm_isdst 	= -1,
@@ -23,37 +23,51 @@ static uint64_t tbr_sync_rtc_read_time(void){
     };
 	
     time_t rtc_time_utc = mktime(&rtctime_struct);
-    return (uint64_t) rtc_time_utc;
+    return (uint32_t) rtc_time_utc;
 }
 
 void tbr_sync_thread(void *, void *, void *){
     char rx_buffer[MSG_SIZE];
 	const char s[2]= ",";
     char *token;
+    const char *word = "TBR Sensor";
+    int cntr = 0;
+    uint32_t rtc_timestamp = tbr_sync_rtc_read_time();
+    k_sleep(K_MSEC(1000-rtc_time.sec100));
+    rs485_updatetime(rtc_timestamp+1);
     for(;;){
         k_sem_take(&tbr_sync_task_sem, K_FOREVER);
-        strcpy(rx_buffer, rx_buf);
-        token = strtok(rx_buffer, s); //garbage
-        uint64_t tbr_timestamp = atoi(strtok(NULL,s)); //this gives timestamp
+        
 
         if(RTC_TIME_SET){
             //read time from RTC
-            uint64_t rtc_timestamp = tbr_sync_rtc_read_time();
+			// LOG_INF("uptime seconds in TBRThread before reading rtc: %lld", k_uptime_get());
 
-            LOG_INF("TBR_SYNC_TASK: value for tbr_timestamp is: %lld, value for rtc_timestamp is: %lld\n", tbr_timestamp, rtc_timestamp);
-            int diff = rtc_timestamp-tbr_timestamp;
-            if(diff >= 1){
-                if(rs485_updatetime(rtc_timestamp+diff)!= 0){
-                    LOG_INF("TBR_SYNC_TASK: RS485 UPDATE TIME FAILED\n");
-                }
+            // uint32_t rtc_timestamp = tbr_sync_rtc_read_time();
+			// // LOG_INF("uptime seconds in TBRThread after reading rtc: %lld", k_uptime_get());
+            // if(rs485_readtbrtime_commandmode(rtc_timestamp)!= 0){
+            //     LOG_ERR("TBR_SYNC_THREAD: Couldn't syncrhonize time...\n");
+            // }
+            cntr++;
+            strcpy(rx_buffer, rx_buf);
+            token = strtok(rx_buffer, s); //garbage
+            uint32_t tbr_timestamp = atoi(strtok(NULL, s)); 
+            rtc_timestamp = tbr_sync_rtc_read_time(); //-10 since tblive sends messages after 10.5s delay
+            if(cntr>50){
+                k_sleep(K_MSEC(1000-rtc_time.sec100));
+                rs485_updatetime(rtc_timestamp+1);
+                cntr = 0;
             }
-            else if(diff < 0){
-                if(rs485_updatetime(rtc_timestamp)!= 0){
-                    LOG_INF("TBR_SYNC_TASK: RS485 UPDATE TIME FAILED\n");
-                }
-            }
+            
+           
+            
+            LOG_INF("TBR_SYNC_TASK: value for tbr_timestamp is: %d, value for rtc_timestamp is: %d\n", tbr_timestamp, rtc_timestamp);
+            
+            // int diff = rtc_timestamp-tbr_timestamp;
+            // k_sleep(K_MSEC(9900));
+            
+            
         }
-		// memset((void *) rx_buf, 0, sizeof(rx_buf)/sizeof(char));
 
         }
 }

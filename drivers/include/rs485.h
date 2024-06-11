@@ -28,6 +28,8 @@ uint8_t rs485_init(void);
 uint8_t rs485_transmit(void);
 uint8_t rs485_extractserialnnumber(void);
 uint8_t rs485_updatetime(uint64_t unix_time_ms);
+uint8_t rs485_readtbrtime_commandmode(uint32_t rtc_time);
+
 void print_uart(char *buf);
 
 #endif

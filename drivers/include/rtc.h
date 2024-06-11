@@ -190,8 +190,8 @@ extern rtc_time_bcd_t time_bcd;
 // uint8_t rtc_second_offset_to_gps;
 
 uint8_t rtc_init(void);
-int16_t rtc_read_temp(void);
-
+int8_t rtc_read_temp(void);
+uint8_t rtc_sync_seconds(uint8_t second, uint16_t millisec);
 uint8_t rtc_i2c_write(uint8_t address, uint8_t data);
 uint8_t rtc_i2c_write_datetime(rtc_time_bcd_t datetime);
 uint8_t rtc_i2c_read(uint8_t address, uint8_t num_bytes);

@@ -15,8 +15,8 @@
 
 
 //I2C RV3032
-#define I2C0_NODE DT_NODELABEL(rv3032)
-static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C0_NODE);
+#define I2C2_NODE DT_NODELABEL(rv3032)
+static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C2_NODE);
 
 
 
@@ -88,7 +88,7 @@ uint8_t rtc_write_fix_data_first(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
     return EXIT_FAILURE;
   }
   //write bcd format date/time to RTC
-  k_busy_wait(1000*(1000-pvt_data->datetime.ms));
+  // k_sleep(K_MSEC(1000-pvt_data->datetime.ms));
   ret = rtc_i2c_write_datetime(time_bcd);
   if(ret != 0){
     printk("Error while writing NAV date/time into RTC\n");
@@ -101,7 +101,8 @@ uint8_t rtc_write_fix_data_first(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 
 uint8_t rtc_sync_nav_second(void){
   //Enable ESYN bit 15h – EVI Control register
-  int ret = rtc_i2c_write(RTC_EVI_Control, 1);
+  uint8_t evi = RTC_EVI_Control_EHL | RTC_EVI_Control_ESYN;
+  int ret = rtc_i2c_write(RTC_EVI_Control, evi);
   if(ret != 0){
     printk("Enabling ESYN bit for synchronization of RTC failed!\n");
     return EXIT_FAILURE;
@@ -467,15 +468,25 @@ uint16_t rtc_convert_decimal_to_bcd(uint16_t time_dec){
 //     }
 // }
 
-
+uint8_t rtc_sync_seconds(uint8_t second, uint16_t millisec){
+  second = second + 1;
+  k_sleep(K_MSEC(1000-millisec));
+  return rtc_i2c_write(RTC_Sec,second);
+}
 
 //returns temperature in celcius
-int16_t rtc_read_temp(void)
+int8_t rtc_read_temp(void)
 {
   // uint8_t lsbtemp = rtc_i2c_read(RTC_TEMP_LSB, 1) & (15 << 4);
-  int16_t temp   = (int16_t)rtc_i2c_read(RTC_TEMP_MSB, 1);
+  int8_t temp   = (int16_t)rtc_i2c_read(RTC_TEMP_MSB, 1);
+  
+	if(temp & 0x80)
+	{
+		temp = -(~temp +1);	//twos comp
+	} 
+  
   temp = (temp << 4) / 16;
   
   // int16_t temp   = ((rtc_i2c_read(RTC_TEMP_MSB, 1) << 4) | lsbtemp) / 16;
-  return (int16_t)temp;
+  return temp;
 }

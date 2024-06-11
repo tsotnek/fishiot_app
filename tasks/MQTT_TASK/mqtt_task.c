@@ -4,6 +4,8 @@
 #include "mqtt_task.h"
 #include "leds.h"
 #include "structs.h"
+#include <zephyr/sys/reboot.h>
+#include <zephyr/sys/sys_heap.h>
 
 LOG_MODULE_DECLARE(FishIoT);
 
@@ -16,7 +18,12 @@ extern struct k_sem mqtt_pub_thread_start;
 extern struct k_sem mqtt_pub_sem; 
 extern struct k_sem mqtt_pub_done_sem; 
 extern struct k_sem mqtt_lock_mutex; 
+extern struct k_sem gnss_lock_mutex;
 
+
+extern struct k_sem modem_fault_sem;
+extern bool modem_fault;
+extern struct k_sem block_mqtt_on_fault_sem;
 //MQTT
 /* The mqtt client struct */
 static struct mqtt_client client;
@@ -26,6 +33,19 @@ static struct pollfd fds;
 
 uint8_t mqttmessageformat[15] = {0};
 uint8_t mqttmessagelen;
+
+extern struct k_heap _system_heap;
+struct sys_memory_stats stats;
+void rtos_hal_print_heap_info(void) 
+{
+    sys_heap_runtime_stats_get(&_system_heap.heap, &stats);
+
+    LOG_INF("\nINFO: Allocated Heap = %zu\n", stats.allocated_bytes);
+    LOG_INF("INFO: Free Heap = %zu\n", stats.free_bytes);
+    LOG_INF("INFO: Max Allocated Heap = %zu\n", stats.max_allocated_bytes);
+
+    return;
+}
 //helper function
 static uint8_t formatmessage(void){
 	if(k_msgq_num_used_get(&IoFHEADER_MSG)==0){
@@ -158,22 +178,37 @@ void mqtt_thread(void *, void *, void *){
 	// k_sem_take(&mqtt_pub_thread_start, K_FOREVER);
 	
 	int err;
-	// unsigned int irqkey;
 	err = client_init(&client);
 	if (err) {
 		LOG_ERR("Failed to initialize MQTT client: %d", err);
 	}
 	int connect_attempt = 0;
+	int total_connect_attempt = 0;
 	for(;;){
 	k_sem_take(&mqtt_pub_sem, K_FOREVER);
 	k_sem_take(&mqtt_lock_mutex,K_FOREVER);
+	k_sem_take(&gnss_lock_mutex,K_NO_WAIT);
+	// thread_analyzer_print();
 do_connect:
 	if (connect_attempt > 0) {
 		LOG_INF("Reconnecting in %d seconds...",
 			CONFIG_MQTT_RECONNECT_DELAY_S);
 		// irq_unlock(irqkey);
+		total_connect_attempt++;
 		k_sleep(K_SECONDS(CONFIG_MQTT_RECONNECT_DELAY_S));
 		connect_attempt = 0;
+		if(modem_fault)
+		{	
+			k_sem_take(&block_mqtt_on_fault_sem, K_FOREVER);
+			modem_fault=false;
+		}
+		else if(total_connect_attempt>=3)
+		{
+			k_sem_give(&modem_fault_sem);
+			k_sleep(K_SECONDS(CONFIG_MQTT_RECONNECT_DELAY_S));
+			k_sem_take(&block_mqtt_on_fault_sem, K_FOREVER);
+			total_connect_attempt=0;
+		}
 	}
 	// irqkey = irq_lock();
 	
@@ -184,12 +219,11 @@ do_connect:
 		connect_attempt++;
 		goto do_connect;
 	}
+	// rtos_hal_print_heap_info();
 
 	err = fds_init(&client,&fds);
 	if (err) {
 		LOG_ERR("Error in fds_init: %d", err);
-		connect_attempt++;
-		goto do_connect;
 	}
 
 	err = poll(&fds, 1, mqtt_keepalive_time_left(&client));
@@ -234,18 +268,21 @@ do_connect:
 	if ((fds.revents & POLLERR) == POLLERR) {
 		connect_attempt++;
 		LOG_ERR("POLLERR");
-		if (err) {
-			LOG_ERR("Could not disconnect MQTT client: %d", err);
-		}
+		err = mqtt_disconnect(&client);
+			if (err) {
+				LOG_ERR("Could not disconnect MQTT client: %d", err);
+			}
+
 		goto do_connect;
 	}
 
 	if ((fds.revents & POLLNVAL) == POLLNVAL) {
 		connect_attempt++;
 		LOG_ERR("POLLNVAL");
-		if (err) {
-			LOG_ERR("Could not disconnect MQTT client: %d", err);
-		}
+		err = mqtt_disconnect(&client);
+			if (err) {
+				LOG_ERR("Could not disconnect MQTT client: %d", err);
+			}
 		goto do_connect;
 	}
 	while(formatmessage()){
@@ -259,6 +296,7 @@ do_connect:
 		}
 		memset((void *) mqttmessageformat, 0, sizeof(mqttmessageformat)/sizeof(uint8_t));
 		memset((void *) &mqttmessagelen, 0, sizeof(uint8_t));
+	
 	}
 
 	LOG_INF("Disconnecting MQTT client");
@@ -266,7 +304,7 @@ do_connect:
 	if (err) {
 		LOG_ERR("Could not disconnect MQTT client: %d", err);
 	}
-	
+	// rtos_hal_print_heap_info();
 	// k_sem_give(&mqtt_pub_done_sem);
 	k_sem_give(&mqtt_lock_mutex);
 	// irq_unlock(irqkey);

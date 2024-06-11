@@ -173,6 +173,10 @@ void rs485_thread(void *, void *, void *){
 			}
 			LOG_INF("Detected FISH on TBR: %s", rx_cpy);
 		}
-		k_sem_give(&mqtt_pub_sem);
+		if(header.Tbr_message_type == 0) //if tag
+			k_sem_give(&mqtt_pub_sem); //give semaphore immediately to publish message
+		else if(k_msgq_num_used_get(&IoFHEADER_MSG) >= 5)
+			if(k_sem_count_get(&mqtt_pub_sem)!=1)
+				k_sem_give(&mqtt_pub_sem);
 	}
 }

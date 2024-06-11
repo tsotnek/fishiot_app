@@ -21,6 +21,7 @@
 #include "gnss_task.h"
 #include "rtc_task.h"
 #include "tbr_sync_task.h"
+#include <zephyr/debug/thread_analyzer.h>
 
 #define STACKSIZE 2048
 #define MQTT_THREAD_PRIORITY 9
@@ -28,6 +29,10 @@
 #define RS485_THREAD_PRIORITY 6
 #define GNSS_THREAD_PRIORITY 8
 #define TBR_SYNC_THREAD_PRIORITY 5
+#define GNSS_START_PERIOD_THREAD_PRIORITY 4
+
+//fault handling
+#define MODEM_FAULT_THREAD_PRIORITY 2
 
 bool RTC_TIME_SET = false;
 
@@ -41,6 +46,7 @@ K_MSGQ_DEFINE(IoFBuoy_Status_MSG, sizeof(IoF_bouy_status), 16, sizeof(uint32_t))
 
 
 //semaphores
+K_SEM_DEFINE(modem_fault_sem, 0, 1);
 static K_SEM_DEFINE(lte_connected, 0, 1);
 static K_SEM_DEFINE(time_sem, 0, 1);
 static K_SEM_DEFINE(time_read_sem, 0, 1);
@@ -56,9 +62,12 @@ K_SEM_DEFINE(mqtt_pub_sem, 0, 1);
 K_SEM_DEFINE(mqtt_pub_thread_start, 0, 1);
 K_SEM_DEFINE(mqtt_pub_done_sem, 0, 1);
 
+//fault
+K_SEM_DEFINE(block_mqtt_on_fault_sem, 0, 1);
+
 
 K_SEM_DEFINE(mqtt_lock_mutex, 0, 1);
-
+K_SEM_DEFINE(gnss_lock_mutex, 0, 1);
 uint16_t TBSN; //tbr serial number
 
 //Function prototypes
@@ -73,6 +82,10 @@ K_THREAD_STACK_DEFINE(rtc_thread_id, STACKSIZE);
 K_THREAD_STACK_DEFINE(rs485_thread_id, STACKSIZE);
 K_THREAD_STACK_DEFINE(gnss_thread_id, STACKSIZE);
 K_THREAD_STACK_DEFINE(tbr_sync_thread_id, STACKSIZE/2);
+K_THREAD_STACK_DEFINE(gnss_start_period_thread_id, STACKSIZE/4);
+
+//fault hanlding
+K_THREAD_STACK_DEFINE(modem_fault_thread_id, STACKSIZE);
 
 
 
@@ -81,12 +94,17 @@ struct k_thread rtc_thread_struct;
 struct k_thread rs485_thread_struct;
 struct k_thread gnss_thread_struct;
 struct k_thread tbr_sync_thread_struct;
+struct k_thread gnss_start_period_thread_struct;
+
+//fault hanlding
+struct k_thread modem_fault_thread_struct;
 
 
 k_tid_t rtc_thread_tid;
 k_tid_t gnss_thread_tid;
 k_tid_t mqtt_thread_tid;
 k_tid_t tbr_sync_thread_tid;
+k_tid_t gnss_start_period_thread_tid;
 
 
 static void date_time_evt_handler(const struct date_time_evt *evt)
@@ -110,8 +128,14 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 	case LTE_LC_EVT_RRC_UPDATE:
 		LOG_INF("RRC mode: %s", evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ?
 				"Connected" : "Idle");
-		if(evt->rrc_mode == LTE_LC_RRC_MODE_IDLE)
-			k_sem_give(&gnss_start_sem);
+		if(evt->rrc_mode == LTE_LC_RRC_MODE_IDLE){
+			if(!first_fix)
+				k_sem_give(&gnss_start_sem);
+
+			k_sem_give(&gnss_lock_mutex);
+			// k_sem_give(&mqtt_lock_mutex);
+
+		}
 		break;
 	case LTE_LC_EVT_PSM_UPDATE:
 		LOG_INF("PSM parameter update: TAU: %d, Active time: %d",
@@ -131,13 +155,74 @@ static void lte_handler(const struct lte_lc_evt *const evt)
      }
 }
 
+bool modem_fault = false;
+
+static void restart_on_fault(void *p1, void *p2, void *p3)
+{
+	while(true)
+	{
+		k_sem_take(&modem_fault_sem, K_FOREVER);
+		thread_analyzer_print();
+	  	//sys_reboot(SYS_REBOOT_COLD);
+       //  k_yield();
+		LOG_ERR("REINITALIZING MODEM!\n");
+		(void)nrf_modem_lib_shutdown();
+        LOG_INF("MODEM SHUTDOWN OK\n");
+		k_sleep(K_MSEC(500));
+
+		int err = nrf_modem_lib_init();
+	    if (err) {
+		LOG_ERR("failed to initialize modem library, error: %d", err);
+		}
+
+        // LOG_INF("MODEM INIT OK\n");
+		// /* lte_lc_init deprecated in >= v2.6.0 */
+		// #if NCS_VERSION_NUMBER < 0x20600
+		// err = lte_lc_init();
+		// if (err) {
+		// 	LOG_ERR("Failed to initialize LTE link control library, error: %d", err);
+		// }
+		// #endif
+        // LOG_INF("MODEM LC INIT OK\n");
+		// //enable PSM
+		// err = lte_lc_psm_req(true);
+		// if (err) {
+		// 	LOG_ERR("lte_lc_psm_req, error: %d", err);
+		// }
+
+		// LOG_INF("Connecting to LTE network");
+
+		// // lte_lc_register_handler(lte_handler);
+
+		// if (lte_lc_connect() != 0) {
+		// 	LED_ERROR_CODE(LTE_NETWORK_CONNECT_ERROR);
+		// 	LOG_ERR("Failed to connect to LTE network");
+		// }
+
+		// if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_NORMAL) != 0) {
+		// LOG_ERR("Failed to activate GNSS functional mode");
+		// }
+
+		k_sem_give(&block_mqtt_on_fault_sem);
+	}
+}
+
+void nrf_modem_fault_handler(struct nrf_modem_fault_info *fault_info){
+	LOG_ERR("NRFMODEM FAULT HANDLER, ERROR: %d\n", fault_info->reason);
+	//restart the modem
+	if(fault_info->reason == NRF_MODEM_FAULT_PANIC)
+	{
+		modem_fault = true;
+		k_sem_give(&modem_fault_sem);
+	}
+}
 
 static int modem_configure(void)
 {
 	int err;
 
 	LOG_INF("Initializing modem library");
-
+	
 	err = nrf_modem_lib_init();
 	if (err) {
 		LOG_ERR("Failed to initialize the modem library, error: %d", err);
@@ -198,9 +283,18 @@ static int modem_configure(void)
 }
 
 
+// void thread_analyzer_cb(struct thread_analyzer_info *info){
+	
+// }
+
+
+
 int main(void)
 {
 	int err;
+	
+  	// thread_analyzer_run(thread_analyzer_cb);
+	// thread_analyzer_print();
 	LOG_INF("Starting Application IoF...\n");
 	// k_mutex_lock(&mqtt_lock_mutex, K_FOREVER);	
 	if(led_button_init() != 0){
@@ -269,13 +363,22 @@ int main(void)
 		sys_reboot(SYS_REBOOT_COLD);
 	}
 	
+	//fault handling
+	k_tid_t modem_fault_tid = k_thread_create(&modem_fault_thread_struct, modem_fault_thread_id, K_THREAD_STACK_SIZEOF(modem_fault_thread_id), restart_on_fault, NULL,NULL,NULL, MODEM_FAULT_THREAD_PRIORITY, 0, K_NO_WAIT);
+
+
 	rtc_thread_tid = k_thread_create(&rtc_thread_struct, rtc_thread_id, K_THREAD_STACK_SIZEOF(rtc_thread_id), rtc_thread, NULL,NULL,NULL, RTC_THREAD_PRIORITY, 0, K_FOREVER);
 
-	// rtc_thread_tid = k_thread_create(&rtc_thread_struct, rtc_thread_id, K_THREAD_STACK_SIZEOF(rtc_thread_id), rtc_thread, NULL,NULL,NULL, RTC_THREAD_PRIORITY, 0, K_FOREVER);
 	gnss_thread_tid = k_thread_create(&gnss_thread_struct, gnss_thread_id, K_THREAD_STACK_SIZEOF(gnss_thread_id), gnss_thread, NULL,NULL,NULL, GNSS_THREAD_PRIORITY, 0, K_FOREVER);
 
 	k_tid_t rs485_thread_tid = k_thread_create(&rs485_thread_struct, rs485_thread_id, K_THREAD_STACK_SIZEOF(rs485_thread_id), rs485_thread, NULL,NULL,NULL, RS485_THREAD_PRIORITY, 0, K_NO_WAIT);
-	tbr_sync_thread_tid = k_thread_create(&tbr_sync_thread_struct, tbr_sync_thread_id, K_THREAD_STACK_SIZEOF(tbr_sync_thread_id), tbr_sync_thread, NULL,NULL,NULL, TBR_SYNC_THREAD_PRIORITY, 0, K_NO_WAIT);
+	tbr_sync_thread_tid = k_thread_create(&tbr_sync_thread_struct, tbr_sync_thread_id, K_THREAD_STACK_SIZEOF(tbr_sync_thread_id), tbr_sync_thread, NULL,NULL,NULL, TBR_SYNC_THREAD_PRIORITY, 0, K_FOREVER);
+	
+	gnss_start_period_thread_tid = k_thread_create(&gnss_start_period_thread_struct, gnss_start_period_thread_id, K_THREAD_STACK_SIZEOF(gnss_start_period_thread_id), gnss_start_period_thread, NULL,NULL,NULL, GNSS_START_PERIOD_THREAD_PRIORITY, 0, K_FOREVER);
+
+
+
+	
 	return 0;
 }
 

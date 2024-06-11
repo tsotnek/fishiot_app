@@ -13,6 +13,7 @@
 LOG_MODULE_DECLARE(FishIoT);
 
 extern struct k_sem mqtt_lock_mutex; 
+extern struct k_sem gnss_lock_mutex;
 extern struct k_sem gnss_thread_sem; 
 // extern struct k_sem rtc_write_fix_sem; 
 extern struct k_sem rtc_esyn_sem; 
@@ -27,6 +28,20 @@ extern uint16_t TBSN; //tbr serial number
 static int num_satellites = 0;
 static int old_num_sattelites = 0;
 extern k_tid_t rtc_thread_tid;
+extern k_tid_t gnss_start_period_thread_tid;
+
+K_SEM_DEFINE(gnss_period_start_sem, 0, 1);
+
+uint8_t gnss_activation_cntr;
+struct k_timer gnss_error_timer;
+void gnss_error_timer_function(struct k_timer *timer_id){
+		LOG_INF("GNSS TIMER TRIGGERED!\n");
+		k_sem_give(&gnss_period_start_sem);
+		
+}
+
+
+
 
 
 void gnss_event_handler(int event)
@@ -51,6 +66,7 @@ void gnss_event_handler(int event)
 			return;
 		}
 		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
+			// gnss_activation_cntr++;
 			print_fix_data(&pvt_data);
 			old_num_sattelites = num_satellites;
 			/* Print the time to first fix */
@@ -64,15 +80,24 @@ void gnss_event_handler(int event)
 				k_sem_give(&rtc_esyn_sem);
 			}
 			
-			k_sem_give(&gnss_thread_sem);
-
+			num_satellites=0;
+			// if(gnss_activation_cntr>4){
+			// 	err = nrf_modem_gnss_stop();
+			// 	{
+			// 		LOG_INF("GNSS WAS NOT SHUT DOWN error code: %d\n", err);
+			// 	}
+			// }
 			return;
 		}
 		num_satellites=0;
 		break;
+	case NRF_MODEM_GNSS_EVT_SLEEP_AFTER_TIMEOUT:
+		//give up semaphore if couldnt get the fix.
+		LOG_INF("GNSS timedout without getting fix");
+		k_sem_give(&mqtt_lock_mutex);
+		break;
 	/* Log when the GNSS sleeps and wakes up */
 	case NRF_MODEM_GNSS_EVT_PERIODIC_WAKEUP:
-		k_sem_take(&mqtt_lock_mutex,K_NO_WAIT);
 		LOG_INF("GNSS has woken up");
 
 		// k_mutex_lock(&mqtt_lock_mutex,K_MSEC(100));
@@ -80,8 +105,9 @@ void gnss_event_handler(int event)
 		break;
 	case NRF_MODEM_GNSS_EVT_SLEEP_AFTER_FIX:
 		LOG_INF("GNSS enter sleep after fix");
-		// k_mutex_unlock(&mqtt_lock_mutex);
 		k_sem_give(&mqtt_lock_mutex);
+
+		// k_mutex_unlock(&mqtt_lock_mutex);
 
 		break;
 	default:
@@ -138,17 +164,34 @@ static void convert_to_nmea(IoF_bouy_status* bouy){
 	bouy->latitude = (uint32_t)(latitude * 10000000);
 }
 
+void gnss_start_period_thread(void *, void *, void *){
+
+	for(;;){
+	k_sem_take(&gnss_period_start_sem, K_FOREVER);
+	k_sem_take(&gnss_lock_mutex,K_FOREVER);
+
+	k_sem_take(&mqtt_lock_mutex, K_NO_WAIT);
+	int err = gnss_periodic_start();
+	if(err!=0)
+	{
+		LOG_INF("GNSS COULD NOT START! Error code: %d", err);
+	}
+	LOG_INF("STARTING GNSS TIMER\n");
+	k_timer_start(&gnss_error_timer, K_SECONDS(140), K_NO_WAIT);
+	}
+}
+
 //THREAD
 void gnss_thread(void *, void *, void *){
+	k_thread_start(gnss_start_period_thread_tid);
+	k_timer_init(&gnss_error_timer, gnss_error_timer_function, NULL);
+	k_timer_start(&gnss_error_timer, K_SECONDS(140), K_NO_WAIT);
+
 	for(;;){
 		//wait until the GNSS fix occurs
 		k_sem_take(&gnss_thread_sem, K_FOREVER);
-		int err = rtc_read_time_data();
-		if (err != 0){
-			LOG_ERR("GNSS_THREAD: Failed to read date from RTC\n");
-		}
-		LOG_INF("GNSS_THREAD: Time from RTC: %d:%d:%d.%d\n", rtc_time.hour, rtc_time.minute, rtc_time.seconds,rtc_time.sec100);
-	
+
+		
 		IoF_header header;
 		header.TBRserial = TBSN;
 		header.headerflag = buoy_status;
@@ -164,24 +207,8 @@ void gnss_thread(void *, void *, void *){
 	
 		time_t t_of_day = mktime(&ti);
 		header.reftimestamp = (uint32_t)t_of_day;
-
-		struct tm rtctime_struct={
-			.tm_isdst 	= -1,
-			.tm_sec 	= rtc_time.seconds,
-			.tm_min 	= rtc_time.minute,
-			.tm_hour 	= rtc_time.hour,
-			.tm_mday 	= rtc_time.day,
-			.tm_mon 	= rtc_time.month - 1,
-			.tm_year 	= rtc_time.year + 2000 - 1900
-		};
-	
-		time_t rtc_time_utc = mktime(&rtctime_struct);
-
-		LOG_INF("GNSS_THREAD: UTC TIMESTAMP FOR GNSS IS: %d\n", header.reftimestamp);
-		LOG_INF("GNSS_THREAD: UTC TIMESTAMP FOR RTC IS: %d\n", (uint32_t)rtc_time_utc);
-
 		IoF_bouy_status bouy;
-		bouy.batvoltage = (uint8_t)((adc_read_voltage()*100)/BAT_VOLTAGE_NOMINAL_MV);
+		bouy.batvoltage = (uint8_t)((adc_read_voltage()*(128/4.8))/1000);
 		bouy.airtemp = rtc_read_temp();
 		convert_to_nmea(&bouy);
 		bouy.fix = 3; //3D fix to be compatible with IoF format
@@ -214,8 +241,9 @@ void gnss_thread(void *, void *, void *){
 		if(k_msgq_put(&IoFBuoy_Status_MSG, &bouy, K_FOREVER)!=0){
 			LOG_INF("GNSS_THREAD: Message couldn't be placed in IoFBuoy_Status_MSG queue\n");
 		}
-		// if(k_msgq_num_used_get(&IoFHEADER_MSG)>5)
-			k_sem_give(&mqtt_pub_sem);
+		if(k_msgq_num_used_get(&IoFHEADER_MSG) >= 5)
+			if(k_sem_count_get(&mqtt_pub_sem)!=1)
+				k_sem_give(&mqtt_pub_sem);
 
 	}
 }
